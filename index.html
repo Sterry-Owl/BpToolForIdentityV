@@ -6,7 +6,9 @@
     <title>第五人格賽事對局表格生成器</title>
     <!-- 引入 Tailwind CSS 作為控制面板樣式框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 html2canvas 供高品質圖片匯出 -->
+    <!-- 引入 modern-screenshot (原生 SVG foreignObject 渲染核心，徹底解決 html2canvas 文字下沉與線條偏移問題) -->
+    <script src="https://cdn.jsdelivr.net/npm/modern-screenshot@4.6.0/dist/index.js"></script>
+    <!-- 引入 html2canvas 作為備援匯出引擎 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <!-- 引入 Google Fonts 確保中英文字體美觀與跨平台一致 -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -44,12 +46,59 @@
         .match-table th,
         .match-table td {
             border: 1.5px solid #000000;
-            padding: 6px 8px;
+            padding: 0;
             text-align: center;
             vertical-align: middle;
             word-wrap: break-word;
             overflow-wrap: break-word;
             box-sizing: border-box;
+            position: relative;
+        }
+
+        /* 每個儲存格內部採用 Flex 絕對垂直與水平置中，徹底消除匯出圖片時文字偏下問題 */
+        .cell-inner {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            min-height: 44px;
+            padding: 8px 10px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+
+        .cell-inner-body {
+            min-height: 78px;
+            padding: 9px 10px;
+            gap: 3px;
+        }
+
+        /* 精準自訂底線：使用獨立底線盒模型取代 CSS text-decoration: underline，絕不壓字或切字 */
+        .custom-underline {
+            display: inline-block;
+            border-bottom: 1.5px solid currentColor;
+            padding-bottom: 2px;
+            line-height: 1.25;
+        }
+
+        /* 精準自訂刪除線：使用絕對定位中心線取代 CSS line-through，確保刪除線永遠位於文字正中央 */
+        .custom-strike {
+            position: relative;
+            display: inline-block;
+            line-height: 1.25;
+        }
+        .custom-strike::after {
+            content: "";
+            position: absolute;
+            left: -2px;
+            right: -2px;
+            top: 50%;
+            height: 1.5px;
+            background-color: currentColor;
+            transform: translateY(-50%);
+            pointer-events: none;
         }
 
         /* 經典粉綠亮色主題（對應參考圖2） */
@@ -95,14 +144,17 @@
             font-family: var(--font-serif);
             font-weight: 700;
             font-size: 17px;
-            margin-bottom: 1px;
+            line-height: 1.25;
         }
         .theme-classic .footer-winner {
             font-size: 20px;
             font-weight: 500;
-            padding: 8px;
         }
         .theme-classic .footer-score {
+            font-size: 18px;
+            font-weight: 500;
+        }
+        .theme-classic .score-cell {
             font-size: 17px;
             font-weight: 500;
         }
@@ -159,6 +211,28 @@
             font-family: var(--font-sans);
             font-size: 20px;
             font-weight: 800;
+        }
+
+        /* 精準底線與刪除線樣式（避免原生 text-decoration 貫穿中文字體） */
+        .custom-underline {
+            border-bottom: 1.5px solid currentColor;
+            padding-bottom: 2px;
+            display: inline-block;
+            line-height: 1.15;
+        }
+        .custom-strike {
+            position: relative;
+            display: inline-block;
+            line-height: 1.2;
+        }
+        .custom-strike .strike-line {
+            position: absolute;
+            left: -2px;
+            right: -2px;
+            top: 52%;
+            height: 1.5px;
+            background-color: currentColor;
+            pointer-events: none;
         }
 
         /* 畫布內可直接點擊編輯的樣式提示 */
@@ -265,7 +339,7 @@
                         <div>
                             <label class="block text-xs font-medium text-slate-700 mb-1">配色主題</label>
                             <select id="opt-theme" class="w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-indigo-500">
-                                <option value="classic">經典粉綠版 (白底黑字)</option>
+                                <option value="classic">經典自訂配色版 (亮色)</option>
                                 <option value="dark">深色賽事版 (黑底白字)</option>
                             </select>
                         </div>
@@ -291,13 +365,71 @@
                             <span>禁用地圖加上刪除線</span>
                         </label>
                         <label class="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-                            <input type="checkbox" id="opt-pick-underline" class="rounded text-indigo-600">
+                            <input type="checkbox" id="opt-pick-underline" checked class="rounded text-indigo-600">
                             <span>選用角色加上底線</span>
                         </label>
                         <label class="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
                             <input type="checkbox" id="opt-show-empty-ban" checked class="rounded text-indigo-600">
                             <span>未輸入時顯示範本預設文字 (如 求生者 1、屠夫 等)</span>
                         </label>
+                    </div>
+
+                    <!-- 隊伍代表色與獲勝變色設定 -->
+                    <div class="pt-2.5 mt-2 border-t border-slate-200 space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-slate-700">經典版隊伍代表色與獲勝底色設定</span>
+                            <button type="button" id="btn-reset-colors" class="text-[11px] text-indigo-600 hover:text-indigo-800 underline">恢復預設粉綠</button>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="bg-white p-2 rounded border border-slate-200 flex items-center justify-between">
+                                <span class="text-xs font-medium text-slate-700">隊伍 A 顏色</span>
+                                <div class="flex items-center gap-1.5">
+                                    <input type="color" id="opt-color-team-a" value="#d59ba6" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent">
+                                    <input type="text" id="opt-color-team-a-hex" value="#d59ba6" class="w-16 text-[11px] font-mono border border-slate-300 rounded px-1 py-0.5 text-center uppercase">
+                                </div>
+                            </div>
+                            <div class="bg-white p-2 rounded border border-slate-200 flex items-center justify-between">
+                                <span class="text-xs font-medium text-slate-700">隊伍 B 顏色</span>
+                                <div class="flex items-center gap-1.5">
+                                    <input type="color" id="opt-color-team-b" value="#9eb48d" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent">
+                                    <input type="text" id="opt-color-team-b-hex" value="#9eb48d" class="w-16 text-[11px] font-mono border border-slate-300 rounded px-1 py-0.5 text-center uppercase">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-xs font-medium text-slate-700 mb-1">獲勝大局底色變色範圍</label>
+                                <select id="opt-round-win-style" class="w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-indigo-500">
+                                    <option value="row">整大局橫列皆變為勝隊底色</option>
+                                    <option value="score-only">僅大局比分欄變為勝隊底色</option>
+                                    <option value="side-and-score">獲勝隊伍欄位 + 大局比分變色</option>
+                                    <option value="none">不變色 (維持白底)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-700 mb-1">獲勝大局底色深淺</label>
+                                <select id="opt-round-win-tint" class="w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-indigo-500">
+                                    <option value="1">與表頭同色 (100% 飽和度)</option>
+                                    <option value="0.55">柔和同色系 (55% 飽和度)</option>
+                                    <option value="0.35">清爽淺底色 (35% 飽和度)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                            <label class="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                                <input type="checkbox" id="opt-winner-row-color" checked class="rounded text-indigo-600">
+                                <span>底部「勝者欄」自動套用勝利隊伍底色</span>
+                            </label>
+                            <select id="opt-winner-color-override" class="text-xs border border-slate-300 rounded px-2 py-1 bg-white focus:outline-none focus:border-indigo-500">
+                                <option value="auto">勝者底色：自動依總分/隊名判定</option>
+                                <option value="A">強制套用隊伍 A 底色</option>
+                                <option value="B">強制套用隊伍 B 底色</option>
+                                <option value="none">維持白底</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -327,7 +459,7 @@
                         <div class="sm:col-span-7">
                             <label class="block text-xs font-medium text-slate-700 mb-1">底部獲勝隊伍顯示</label>
                             <div class="flex gap-1">
-                                <input type="text" id="inp-winner" class="flex-1 min-w-0 text-xs border border-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="勝者">
+                                <input type="text" id="inp-winner" class="flex-1 min-w-0 text-xs border border-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="自動依總分判定或手動輸入">
                                 <button type="button" id="btn-win-a" class="px-2 py-1 text-xs bg-rose-100 hover:bg-rose-200 text-rose-900 rounded border border-rose-300 transition whitespace-nowrap">隊伍A</button>
                                 <button type="button" id="btn-win-b" class="px-2 py-1 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded border border-emerald-300 transition whitespace-nowrap">隊伍B</button>
                             </div>
@@ -423,9 +555,15 @@
                     halfFormat: 'short',        // 'short' (1上) | 'full' (第1局上半場)
                     banSeparator: 'slash-gt',   // 'slash-gt' (Ban:A/B>C>D) | 'comma-gt' (A、B>C>D)
                     mapStrikethrough: true,
-                    pickUnderline: false,
+                    pickUnderline: true,
                     showEmptyStructure: true,
-                    autoCalculateScore: true
+                    autoCalculateScore: true,
+                    teamAColor: '#d59ba6',
+                    teamBColor: '#9eb48d',
+                    roundWinHighlight: 'row',   // 'row' | 'score-only' | 'side-and-score' | 'none'
+                    roundWinTint: '1',          // '1' | '0.55' | '0.35'
+                    winnerRowColor: true,
+                    winnerColorOverride: 'auto' // 'auto' | 'A' | 'B' | 'none'
                 },
                 header: {
                     date: '',
@@ -444,6 +582,7 @@
                         roundNumber: 1,
                         roundScoreA: '',
                         roundScoreB: '',
+                        roundWinnerOverride: 'auto', // 'auto' | 'A' | 'B' | 'none'
                         halves: [
                             {
                                 halfName: '上',
@@ -484,6 +623,7 @@
                         roundNumber: 2,
                         roundScoreA: '',
                         roundScoreB: '',
+                        roundWinnerOverride: 'auto',
                         halves: [
                             {
                                 halfName: '上',
@@ -524,6 +664,7 @@
                         roundNumber: 3,
                         roundScoreA: '',
                         roundScoreB: '',
+                        roundWinnerOverride: 'auto',
                         halves: [
                             {
                                 halfName: '上',
@@ -568,92 +709,100 @@
             return {
                 settings: {
                     theme: 'classic',
-                    halfFormat: 'short',
+                    halfFormat: 'full',
                     banSeparator: 'slash-gt',
                     mapStrikethrough: true,
-                    pickUnderline: false,
+                    pickUnderline: true,
                     showEmptyStructure: true,
-                    autoCalculateScore: true
+                    autoCalculateScore: true,
+                    teamAColor: '#d59ba6',
+                    teamBColor: '#9eb48d',
+                    roundWinHighlight: 'row',
+                    roundWinTint: '1',
+                    winnerRowColor: true,
+                    winnerColorOverride: 'auto'
                 },
                 header: {
-                    date: '14 : 00',
-                    teamA: '北京WBG',
-                    teamB: 'Gr',
-                    stage: '常規賽'
+                    date: '11/17',
+                    teamA: 'FJN',
+                    teamB: '輕鬆繃住',
+                    stage: '常規'
                 },
                 footer: {
-                    winner: 'Gr',
-                    finalScoreA: '10',
-                    finalScoreB: '15'
+                    winner: 'FJN',
+                    finalScoreA: '15',
+                    finalScoreB: '11'
                 },
                 rounds: [
                     {
                         roundNumber: 1,
-                        roundScoreA: '4',
-                        roundScoreB: '4',
+                        roundScoreA: '3',
+                        roundScoreB: '6',
+                        roundWinnerOverride: 'auto',
                         halves: [
                             {
                                 halfName: '上',
-                                mapPick: '永眠鎮',
-                                mapBan: '里奧/唐人街',
-                                teamARole: 'survivor',
-                                survivorsPick: ['祭司', '木偶師', '古董商', '大副'],
-                                survivorsBan: ['逃脫大師', '幻燈師', '守墓人', '野人'],
-                                hunterPick: '牙醫',
-                                hunterPlayer: '夢幻小彌',
+                                mapPick: '湖景村',
+                                mapBan: '不歸林、永眠鎮',
+                                teamARole: 'hunter',
+                                survivorsPick: ['鬥牛士', '傭兵', '囚徒', '小說家'],
+                                survivorsBan: ['咒術師', '幻燈師', '心理學家', '弓箭手'],
+                                hunterPick: '跛腳羊',
+                                hunterPlayer: '逆境_砍砍',
                                 huntersBan: [],
                                 showHunterBanLine: false,
                                 hunterBanTemplate: '',
-                                scoreA: '2',
-                                scoreB: '2'
+                                scoreA: '3',
+                                scoreB: '1'
                             },
                             {
                                 halfName: '下',
-                                mapPick: '永眠鎮',
-                                mapBan: '里奧/唐人街',
-                                teamARole: 'hunter',
-                                survivorsPick: ['古董商', '逃脫大師', '飛行家', '作曲家'],
-                                survivorsBan: ['弓箭手', '幻燈師', '氣象學家', '幸運兒'],
-                                hunterPick: '女王蜂',
-                                hunterPlayer: '無桼',
+                                mapPick: '湖景村',
+                                mapBan: '唐人街、永眠鎮',
+                                teamARole: 'survivor',
+                                survivorsPick: ['心理學家', '守墓人', '飛行家', '古董商'],
+                                survivorsBan: ['先知', '醫生', '咒術師', '弓箭手'],
+                                hunterPick: '記錄員',
+                                hunterPlayer: 'HR_none',
                                 huntersBan: [],
                                 showHunterBanLine: false,
                                 hunterBanTemplate: '',
-                                scoreA: '2',
-                                scoreB: '2'
+                                scoreA: '0',
+                                scoreB: '5'
                             }
                         ]
                     },
                     {
                         roundNumber: 2,
-                        roundScoreA: '4',
-                        roundScoreB: '4',
+                        roundScoreA: '7',
+                        roundScoreB: '2',
+                        roundWinnerOverride: 'auto',
                         halves: [
                             {
                                 halfName: '上',
-                                mapPick: '月亮河公園',
-                                mapBan: '湖景村',
+                                mapPick: '聖心醫院',
+                                mapBan: '月亮河公園',
                                 teamARole: 'hunter',
-                                survivorsPick: ['傭兵', '幻燈師', '園丁', '默劇藝人'],
-                                survivorsBan: ['氣象學家', '弓箭手', '鬥牛士', '病患'],
-                                hunterPick: '歌劇演員',
-                                hunterPlayer: '捏捏',
-                                huntersBan: ['跛腳羊'],
+                                survivorsPick: ['雜技演員', '騎士', '玩具商', '作曲家'],
+                                survivorsBan: ['守墓人', '幻燈師', '祭司', '古董商'],
+                                hunterPick: '鹿頭',
+                                hunterPlayer: 'Junnn',
+                                huntersBan: ['檯球手'],
                                 showHunterBanLine: true,
                                 hunterBanTemplate: 'Ban:',
-                                scoreA: '2',
-                                scoreB: '2'
+                                scoreA: '5',
+                                scoreB: '0'
                             },
                             {
                                 halfName: '下',
-                                mapPick: '月亮河公園',
-                                mapBan: '湖景村',
+                                mapPick: '聖心醫院',
+                                mapBan: '月亮河公園',
                                 teamARole: 'survivor',
-                                survivorsPick: ['病患', '鬥牛士', '玩具商', '傭兵'],
-                                survivorsBan: ['氣象學家', '弓箭手', '心理學家', '逃脫大師'],
-                                hunterPick: '歌劇演員',
-                                hunterPlayer: '夢幻小彌',
-                                huntersBan: ['跛腳羊'],
+                                survivorsPick: ['咒術師', '大副', '調香師', '教授'],
+                                survivorsBan: ['逃脫大師', '先知', '木偶師', '啦啦隊員'],
+                                hunterPick: '喧囂',
+                                hunterPlayer: 'HR_none',
+                                huntersBan: ['時空之影'],
                                 showHunterBanLine: true,
                                 hunterBanTemplate: 'Ban:',
                                 scoreA: '2',
@@ -663,19 +812,20 @@
                     },
                     {
                         roundNumber: 3,
-                        roundScoreA: '2',
-                        roundScoreB: '7',
+                        roundScoreA: '5',
+                        roundScoreB: '3',
+                        roundWinnerOverride: 'auto',
                         halves: [
                             {
                                 halfName: '上',
                                 mapPick: '紅教堂',
-                                mapBan: '里奧的回憶',
-                                teamARole: 'survivor',
-                                survivorsPick: ['守墓人', '法羅女士', '弓箭手', '心理學家'],
-                                survivorsBan: ['幸運兒', '逃脫大師', '飛行家', '教授'],
-                                hunterPick: '雜貨商',
-                                hunterPlayer: '夢幻小彌',
-                                huntersBan: ['跛腳羊', '女王蜂'],
+                                mapBan: '永眠鎮',
+                                teamARole: 'hunter',
+                                survivorsPick: ['擊球手', '飛行家', '幸運兒', '先知'],
+                                survivorsBan: ['咒術師', '木偶師', '醫生', '幻燈師'],
+                                hunterPick: '破輪',
+                                hunterPlayer: '逆境_砍砍',
+                                huntersBan: ['喧囂', '檯球手'],
                                 showHunterBanLine: true,
                                 hunterBanTemplate: 'Ban:/',
                                 scoreA: '2',
@@ -684,22 +834,89 @@
                             {
                                 halfName: '下',
                                 mapPick: '紅教堂',
-                                mapBan: '里奧的回憶',
-                                teamARole: 'hunter',
-                                survivorsPick: ['大副', '弓箭手', '氣象學家', '心理學家'],
-                                survivorsBan: ['幸運兒', '咒術師', '先知', '木偶師'],
-                                hunterPick: '跛腳羊',
-                                hunterPlayer: '捏捏',
-                                huntersBan: ['跛腳羊', '台球手'],
+                                mapBan: '永眠鎮',
+                                teamARole: 'survivor',
+                                survivorsPick: ['弓箭手', '鬥牛士', '氣象學家', '作曲家'],
+                                survivorsBan: ['醫生', '逃脫大師', '囚徒', '先知'],
+                                hunterPick: '檯球手',
+                                hunterPlayer: 'HR_none',
+                                huntersBan: ['跛腳羊', '時空之影'],
                                 showHunterBanLine: true,
                                 hunterBanTemplate: 'Ban:/',
-                                scoreA: '0',
-                                scoreB: '5'
+                                scoreA: '3',
+                                scoreB: '1'
                             }
                         ]
                     }
                 ]
             };
+        }
+        // 格式化監管者選角字串（採用 custom-underline 確保匯出圖片時底線絕不切字）
+        function formatHunterPick(half) {
+            const rawPick = (half.hunterPick || '').trim();
+            const pick = rawPick !== '' ? rawPick : (appState.settings.showEmptyStructure ? '屠夫' : '');
+            const player = half.hunterPlayer ? `（${half.hunterPlayer}）` : '';
+            if (appState.settings.pickUnderline && pick) {
+                return `<span class="custom-underline">${escapeHtml(pick)}</span>${escapeHtml(player)}`;
+            }
+            return `${escapeHtml(pick)}${escapeHtml(player)}`;
+        }
+
+        // 將十六進位顏色與白色依指定比例混合，產生柔和底色
+        function blendHexWithWhite(hex, ratio) {
+            const cleanHex = (hex || '#ffffff').replace('#', '');
+            if (cleanHex.length !== 6) return hex;
+            const r = parseInt(cleanHex.substring(0, 2), 16);
+            const g = parseInt(cleanHex.substring(2, 4), 16);
+            const b = parseInt(cleanHex.substring(4, 6), 16);
+            const alpha = parseFloat(ratio);
+            if (isNaN(alpha) || alpha >= 0.99) return `#${cleanHex}`;
+            const mixR = Math.round(r * alpha + 255 * (1 - alpha));
+            const mixG = Math.round(g * alpha + 255 * (1 - alpha));
+            const mixB = Math.round(b * alpha + 255 * (1 - alpha));
+            return `rgb(${mixR}, ${mixG}, ${mixB})`;
+        }
+
+        // 判定單一大局的獲勝隊伍 ('A' | 'B' | null)
+        function getRoundWinner(round) {
+            if (round.roundWinnerOverride === 'A') return 'A';
+            if (round.roundWinnerOverride === 'B') return 'B';
+            if (round.roundWinnerOverride === 'none') return null;
+
+            const scoreA = parseFloat(round.roundScoreA);
+            const scoreB = parseFloat(round.roundScoreB);
+            if (!isNaN(scoreA) && !isNaN(scoreB)) {
+                if (scoreA > scoreB) return 'A';
+                if (scoreB > scoreA) return 'B';
+            }
+            return null;
+        }
+
+        // 判定整場比賽最終勝者所屬隊伍 ('A' | 'B' | null)
+        function getMatchWinnerSide() {
+            const override = appState.settings.winnerColorOverride;
+            if (override === 'A') return 'A';
+            if (override === 'B') return 'B';
+            if (override === 'none') return null;
+
+            const wText = (appState.footer.winner || '').trim();
+            const tA = (appState.header.teamA || '').trim();
+            const tB = (appState.header.teamB || '').trim();
+
+            if (wText !== '' && wText !== '勝者') {
+                if (tA !== '' && wText === tA) return 'A';
+                if (tB !== '' && wText === tB) return 'B';
+                if (wText === '隊伍 A') return 'A';
+                if (wText === '隊伍 B') return 'B';
+            }
+
+            const finalA = parseFloat(appState.footer.finalScoreA);
+            const finalB = parseFloat(appState.footer.finalScoreB);
+            if (!isNaN(finalA) && !isNaN(finalB)) {
+                if (finalA > finalB) return 'A';
+                if (finalB > finalA) return 'B';
+            }
+            return null;
         }
 
         let appState = createTemplateState();
@@ -807,7 +1024,7 @@
             const pick = rawPick !== '' ? rawPick : (appState.settings.showEmptyStructure ? '屠夫' : '');
             const player = half.hunterPlayer ? `（${half.hunterPlayer}）` : '';
             if (appState.settings.pickUnderline && pick) {
-                return `<span style="text-decoration: underline; text-underline-offset: 3px;">${escapeHtml(pick)}</span>${escapeHtml(player)}`;
+                return `<span class="custom-underline">${escapeHtml(pick)}</span>${escapeHtml(player)}`;
             }
             return `${escapeHtml(pick)}${escapeHtml(player)}`;
         }
@@ -888,29 +1105,44 @@
         function renderPreviewTable() {
             recalculateScoresIfNeeded();
 
+            const isClassic = appState.settings.theme !== 'dark';
             const table = document.getElementById('match-table');
-            table.className = `match-table ${appState.settings.theme === 'dark' ? 'theme-dark' : 'theme-classic'}`;
+            table.className = `match-table ${isClassic ? 'theme-classic' : 'theme-dark'}`;
 
             const dateDisplay = appState.header.date.trim() !== '' ? appState.header.date : (appState.settings.showEmptyStructure ? '日期' : '');
             const teamADisplay = appState.header.teamA.trim() !== '' ? appState.header.teamA : (appState.settings.showEmptyStructure ? '隊伍 A' : '');
             const teamBDisplay = appState.header.teamB.trim() !== '' ? appState.header.teamB : (appState.settings.showEmptyStructure ? '隊伍 B' : '');
             const stageDisplay = appState.header.stage.trim() !== '' ? appState.header.stage : (appState.settings.showEmptyStructure ? '常規 or 決賽' : '');
 
+            const teamAColor = appState.settings.teamAColor || '#d59ba6';
+            const teamBColor = appState.settings.teamBColor || '#9eb48d';
+
+            const thTeamAStyle = isClassic ? `style="background-color: ${escapeHtml(teamAColor)};"` : '';
+            const thTeamBStyle = isClassic ? `style="background-color: ${escapeHtml(teamBColor)};"` : '';
+
             // 1. 渲染 Thead
             const thead = document.getElementById('table-head');
             thead.innerHTML = `
                 <tr>
                     <th class="header-date">
-                        <div contenteditable="true" data-bind="header.date">${escapeHtml(dateDisplay)}</div>
+                        <div class="cell-inner">
+                            <div contenteditable="true" data-bind="header.date">${escapeHtml(dateDisplay)}</div>
+                        </div>
                     </th>
-                    <th class="header-team-a">
-                        <div contenteditable="true" data-bind="header.teamA">${escapeHtml(teamADisplay)}</div>
+                    <th class="header-team-a" ${thTeamAStyle}>
+                        <div class="cell-inner">
+                            <div contenteditable="true" data-bind="header.teamA">${escapeHtml(teamADisplay)}</div>
+                        </div>
                     </th>
-                    <th class="header-team-b">
-                        <div contenteditable="true" data-bind="header.teamB">${escapeHtml(teamBDisplay)}</div>
+                    <th class="header-team-b" ${thTeamBStyle}>
+                        <div class="cell-inner">
+                            <div contenteditable="true" data-bind="header.teamB">${escapeHtml(teamBDisplay)}</div>
+                        </div>
                     </th>
                     <th colspan="2" class="header-stage">
-                        <div contenteditable="true" data-bind="header.stage">${escapeHtml(stageDisplay)}</div>
+                        <div class="cell-inner">
+                            <div contenteditable="true" data-bind="header.stage">${escapeHtml(stageDisplay)}</div>
+                        </div>
                     </th>
                 </tr>
             `;
@@ -920,6 +1152,19 @@
             let tbodyHtml = '';
 
             appState.rounds.forEach((round, rIdx) => {
+                const roundWinner = getRoundWinner(round);
+                const winHex = roundWinner === 'A' ? teamAColor : (roundWinner === 'B' ? teamBColor : '');
+                const tintedWinBg = winHex ? blendHexWithWhite(winHex, appState.settings.roundWinTint) : '';
+                const highlightMode = isClassic ? appState.settings.roundWinHighlight : 'none';
+
+                const bgMapCell = (roundWinner && highlightMode === 'row') ? `style="background-color: ${tintedWinBg};"` : '';
+                const bgTeamACell = (roundWinner && (highlightMode === 'row' || (highlightMode === 'side-and-score' && roundWinner === 'A')))
+                    ? `style="background-color: ${tintedWinBg};"` : '';
+                const bgTeamBCell = (roundWinner && (highlightMode === 'row' || (highlightMode === 'side-and-score' && roundWinner === 'B')))
+                    ? `style="background-color: ${tintedWinBg};"` : '';
+                const bgHalfScoreCell = (roundWinner && highlightMode === 'row') ? `style="background-color: ${tintedWinBg};"` : '';
+                const bgRoundScoreCell = (roundWinner && highlightMode !== 'none') ? `style="background-color: ${tintedWinBg};"` : '';
+
                 round.halves.forEach((half, hIdx) => {
                     const halfTitle = appState.settings.halfFormat === 'short'
                         ? `${round.roundNumber}${half.halfName}`
@@ -933,19 +1178,20 @@
                     const defaultMapBan = round.roundNumber >= 3 ? '禁用 A' : '禁用 A/禁用 B';
                     const mapBanDisplay = rawMapBan !== '' ? rawMapBan : (appState.settings.showEmptyStructure ? defaultMapBan : '');
 
-                    const strikeStyle = appState.settings.mapStrikethrough && round.roundNumber < 3
-                        ? 'text-decoration: line-through;'
-                        : (appState.settings.mapStrikethrough && rawMapBan !== '' ? 'text-decoration: line-through;' : '');
+                    const shouldStrikeMap = appState.settings.mapStrikethrough && (round.roundNumber < 3 || rawMapBan !== '');
+                    const mapBanInnerHtml = shouldStrikeMap && mapBanDisplay !== ''
+                        ? `<span class="custom-strike">${escapeHtml(mapBanDisplay)}</span>`
+                        : escapeHtml(mapBanDisplay);
 
-                    // 產生求生者陣營儲存格內容
+                    // 產生求生者陣營儲存格內容（使用 custom-underline 避免匯出時底線切到中文字）
                     const survLine1Raw = formatSurvivorPicks(half);
-                    const survLine1Html = appState.settings.pickUnderline && survLine1Raw.trim() !== '| | |'
-                        ? `<span style="text-decoration: underline; text-underline-offset: 3px;">${escapeHtml(survLine1Raw)}</span>`
+                    const survLine1Html = appState.settings.pickUnderline && survLine1Raw.trim() !== '| | |' && survLine1Raw.trim() !== ''
+                        ? `<span class="custom-underline">${escapeHtml(survLine1Raw)}</span>`
                         : escapeHtml(survLine1Raw);
                     const survLine2Html = escapeHtml(formatSurvivorBans(half));
 
                     const survivorCellHtml = `
-                        <div class="space-y-0.5 py-0.5">
+                        <div class="cell-inner cell-inner-body">
                             <div contenteditable="true" class="text-[14px] tracking-wide">${survLine1Html}</div>
                             <div contenteditable="true" class="text-[13px] tracking-wide">${survLine2Html}</div>
                         </div>
@@ -955,7 +1201,7 @@
                     const hunterLine1Html = formatHunterPick(half);
                     const hunterBanText = formatHunterBans(half, round.roundNumber);
                     const hunterCellHtml = `
-                        <div class="space-y-0.5 py-0.5">
+                        <div class="cell-inner cell-inner-body">
                             <div contenteditable="true" class="text-[14px] tracking-wide">${hunterLine1Html}</div>
                             ${hunterBanText !== '' ? `<div contenteditable="true" class="text-[13px] tracking-wide">${escapeHtml(hunterBanText)}</div>` : ''}
                         </div>
@@ -969,19 +1215,25 @@
 
                     tbodyHtml += `
                         <tr>
-                            <td class="py-1.5">
-                                <div contenteditable="true" class="half-label">${escapeHtml(halfTitle)}</div>
-                                <div contenteditable="true" class="text-[14px] my-0.5">${mapPickDisplay}</div>
-                                <div contenteditable="true" class="text-[13px]" style="${strikeStyle}">${escapeHtml(mapBanDisplay)}</div>
+                            <td ${bgMapCell}>
+                                <div class="cell-inner cell-inner-body">
+                                    <div contenteditable="true" class="half-label">${escapeHtml(halfTitle)}</div>
+                                    <div contenteditable="true" class="text-[14px] leading-snug">${mapPickDisplay}</div>
+                                    <div contenteditable="true" class="text-[13px] leading-snug">${mapBanInnerHtml}</div>
+                                </div>
                             </td>
-                            <td>${teamACellContent}</td>
-                            <td>${teamBCellContent}</td>
-                            <td class="score-cell">
-                                <div contenteditable="true">${escapeHtml(halfScoreStr)}</div>
+                            <td ${bgTeamACell}>${teamACellContent}</td>
+                            <td ${bgTeamBCell}>${teamBCellContent}</td>
+                            <td class="score-cell" ${bgHalfScoreCell}>
+                                <div class="cell-inner cell-inner-body">
+                                    <div contenteditable="true">${escapeHtml(halfScoreStr)}</div>
+                                </div>
                             </td>
                             ${hIdx === 0 ? `
-                                <td rowspan="2" class="score-cell">
-                                    <div contenteditable="true">${escapeHtml(roundScoreStr)}</div>
+                                <td rowspan="2" class="score-cell" ${bgRoundScoreCell}>
+                                    <div class="cell-inner" style="min-height: 156px;">
+                                        <div contenteditable="true">${escapeHtml(roundScoreStr)}</div>
+                                    </div>
                                 </td>
                             ` : ''}
                         </tr>
@@ -991,17 +1243,29 @@
 
             tbody.innerHTML = tbodyHtml;
 
-            // 3. 渲染 Tfoot (底部勝者與總比分)
+            // 3. 渲染 Tfoot (底部勝者與總比分，支援自動變換勝利隊伍底色)
             const tfoot = document.getElementById('table-foot');
             const winnerDisplay = appState.footer.winner.trim() !== '' ? appState.footer.winner : (appState.settings.showEmptyStructure ? '勝者' : '');
             const finalScoreStr = formatScoreDisplay(appState.footer.finalScoreA, appState.footer.finalScoreB);
+
+            const matchWinnerSide = getMatchWinnerSide();
+            let footerBgStyle = '';
+            if (isClassic && appState.settings.winnerRowColor && matchWinnerSide) {
+                const winColor = matchWinnerSide === 'A' ? teamAColor : teamBColor;
+                footerBgStyle = `style="background-color: ${escapeHtml(winColor)};"`;
+            }
+
             tfoot.innerHTML = `
                 <tr>
-                    <td colspan="3" class="footer-winner">
-                        <div contenteditable="true" data-bind="footer.winner">${escapeHtml(winnerDisplay)}</div>
+                    <td colspan="3" class="footer-winner" ${footerBgStyle}>
+                        <div class="cell-inner" style="min-height: 48px;">
+                            <div contenteditable="true" data-bind="footer.winner">${escapeHtml(winnerDisplay)}</div>
+                        </div>
                     </td>
-                    <td colspan="2" class="footer-score">
-                        <div contenteditable="true">${escapeHtml(finalScoreStr)}</div>
+                    <td colspan="2" class="footer-score" ${footerBgStyle}>
+                        <div class="cell-inner" style="min-height: 48px;">
+                            <div contenteditable="true">${escapeHtml(finalScoreStr)}</div>
+                        </div>
                     </td>
                 </tr>
             `;
@@ -1011,6 +1275,115 @@
             document.getElementById('inp-final-b').value = appState.footer.finalScoreB;
 
             adjustPreviewScale();
+        }
+
+        // 將右側表格內 contenteditable 的直接修改同步寫回 appState
+        function bindPreviewInlineEdits() {
+            const table = document.getElementById('match-table');
+            table.querySelectorAll('[contenteditable="true"]').forEach(el => {
+                el.addEventListener('blur', () => {
+                    const key = el.dataset.edit;
+                    if (!key) return;
+                    const text = el.innerText.trim();
+
+                    if (key === 'header.date') {
+                        appState.header.date = text === '日期' ? '' : text;
+                        document.getElementById('inp-date').value = appState.header.date;
+                    } else if (key === 'header.teamA') {
+                        appState.header.teamA = text === '隊伍 A' ? '' : text;
+                        document.getElementById('inp-team-a').value = appState.header.teamA;
+                        renderActiveRoundEditor();
+                    } else if (key === 'header.teamB') {
+                        appState.header.teamB = text === '隊伍 B' ? '' : text;
+                        document.getElementById('inp-team-b').value = appState.header.teamB;
+                        renderActiveRoundEditor();
+                    } else if (key === 'header.stage') {
+                        appState.header.stage = text === '常規 or 決賽' ? '' : text;
+                        document.getElementById('inp-stage').value = appState.header.stage;
+                    } else if (key === 'footer.winner') {
+                        appState.footer.winnerManual = text !== '' && text !== '勝者';
+                        appState.footer.winner = text === '勝者' ? '' : text;
+                        document.getElementById('inp-winner').value = appState.footer.winner;
+                    } else if (key === 'footer.finalScore') {
+                        const parts = text.split(':');
+                        if (parts.length === 2) {
+                            appState.settings.autoCalculateScore = false;
+                            document.getElementById('chk-auto-score').checked = false;
+                            appState.footer.finalScoreA = parts[0].trim();
+                            appState.footer.finalScoreB = parts[1].trim();
+                        }
+                    } else if (key.startsWith('round.')) {
+                        const tokens = key.split('.');
+                        const rIdx = parseInt(tokens[1], 10);
+                        const round = appState.rounds[rIdx];
+                        if (!round) return;
+
+                        if (tokens[2] === 'roundScore') {
+                            const parts = text.split(':');
+                            if (parts.length === 2) {
+                                appState.settings.autoCalculateScore = false;
+                                document.getElementById('chk-auto-score').checked = false;
+                                round.roundScoreA = parts[0].trim();
+                                round.roundScoreB = parts[1].trim();
+                            }
+                        } else if (tokens[2] === 'half') {
+                            const hIdx = parseInt(tokens[3], 10);
+                            const field = tokens[4];
+                            const half = round.halves[hIdx];
+                            if (!half) return;
+
+                            if (field === 'halfTitle') {
+                                half.customHalfTitle = text;
+                            } else if (field === 'mapPick') {
+                                const cleaned = text.replace(/^【|】$/g, '').trim();
+                                half.mapPick = cleaned === '地圖名稱' ? '' : cleaned;
+                            } else if (field === 'mapBan') {
+                                half.mapBan = (text === '禁用 A/禁用 B' || text === '禁用 A') ? '' : text;
+                            } else if (field === 'halfScore') {
+                                const parts = text.split(':');
+                                if (parts.length === 2) {
+                                    half.scoreA = parts[0].trim();
+                                    half.scoreB = parts[1].trim();
+                                }
+                            } else if (field === 'survPick') {
+                                const parts = text.split('|').map(s => s.trim());
+                                if (parts.length === 4 && text !== '求生者 1 | 求生者 2 | 求生者 3 | 求生者 4') {
+                                    half.survivorsPick = parts;
+                                }
+                            } else if (field === 'survBan') {
+                                const noPrefix = text.replace(/^Ban:/i, '');
+                                const parts = noPrefix.split(/[\/、>]/).map(s => s.trim());
+                                if (parts.length === 4 && !text.includes('求生者 1')) {
+                                    half.survivorsBan = parts;
+                                }
+                            } else if (field === 'hunterPick') {
+                                if (text !== '屠夫') {
+                                    const match = text.match(/^([^（(]+)(?:[（(]([^）)]*)[）)])?$/);
+                                    if (match) {
+                                        half.hunterPick = match[1].trim();
+                                        half.hunterPlayer = (match[2] || '').trim();
+                                    } else {
+                                        half.hunterPick = text;
+                                    }
+                                }
+                            } else if (field === 'hunterBan') {
+                                const noPrefix = text.replace(/^Ban:/i, '').trim();
+                                if (noPrefix === '' || noPrefix === '/') {
+                                    half.huntersBan = ['', ''];
+                                } else {
+                                    const parts = noPrefix.split(/[\/、]/).map(s => s.trim());
+                                    half.huntersBan = [parts[0] || '', parts[1] || ''];
+                                    half.showHunterBanLine = true;
+                                }
+                            }
+                            if (rIdx === activeRoundIndex) {
+                                renderActiveRoundEditor();
+                            }
+                        }
+                    }
+                    renderPreviewTable();
+                });
+            });
         }
 
         /**
@@ -1025,6 +1398,15 @@
             document.getElementById('opt-pick-underline').checked = appState.settings.pickUnderline;
             document.getElementById('opt-show-empty-ban').checked = appState.settings.showEmptyStructure;
             document.getElementById('chk-auto-score').checked = appState.settings.autoCalculateScore;
+
+            document.getElementById('opt-color-team-a').value = appState.settings.teamAColor || '#d59ba6';
+            document.getElementById('opt-color-team-a-hex').value = appState.settings.teamAColor || '#d59ba6';
+            document.getElementById('opt-color-team-b').value = appState.settings.teamBColor || '#9eb48d';
+            document.getElementById('opt-color-team-b-hex').value = appState.settings.teamBColor || '#9eb48d';
+            document.getElementById('opt-round-win-style').value = appState.settings.roundWinHighlight || 'row';
+            document.getElementById('opt-round-win-tint').value = appState.settings.roundWinTint || '1';
+            document.getElementById('opt-winner-row-color').checked = appState.settings.winnerRowColor !== false;
+            document.getElementById('opt-winner-color-override').value = appState.settings.winnerColorOverride || 'auto';
 
             document.getElementById('inp-date').value = appState.header.date;
             document.getElementById('inp-team-a').value = appState.header.teamA;
@@ -1056,16 +1438,15 @@
                 tabsContainer.appendChild(btn);
             });
 
-            // 渲染當前選中局數的上下半場詳細表單
             renderActiveRoundEditor();
         }
 
+        // 渲染當前選中大局的上下半場表單
         function renderActiveRoundEditor() {
             const container = document.getElementById('round-editor-container');
+            container.innerHTML = '';
             const round = appState.rounds[activeRoundIndex];
             if (!round) return;
-
-            container.innerHTML = '';
 
             // 本局總分、整局換邊與地圖快速同步列
             const roundSummaryBar = document.createElement('div');
@@ -1080,14 +1461,30 @@
                         複製上半場地圖至下半場
                     </button>
                 </div>
-                <div class="flex items-center gap-1">
-                    <span class="text-xs font-medium text-indigo-900">本局小計：</span>
-                    <input type="text" id="inp-round-score-a" value="${escapeHtml(round.roundScoreA)}" class="w-10 text-center text-xs border border-indigo-300 rounded px-1 py-1 bg-white" placeholder="A">
-                    <span class="text-xs font-bold">:</span>
-                    <input type="text" id="inp-round-score-b" value="${escapeHtml(round.roundScoreB)}" class="w-10 text-center text-xs border border-indigo-300 rounded px-1 py-1 bg-white" placeholder="B">
+                <div class="flex flex-wrap items-center gap-2">
+                    <div class="flex items-center gap-1">
+                        <span class="text-xs font-medium text-indigo-900">本局勝方底色：</span>
+                        <select id="sel-round-win-override" class="text-xs border border-indigo-300 rounded px-1.5 py-1 bg-white">
+                            <option value="auto" ${(!round.roundWinnerOverride || round.roundWinnerOverride === 'auto') ? 'selected' : ''}>自動依本局比分</option>
+                            <option value="A" ${round.roundWinnerOverride === 'A' ? 'selected' : ''}>隊伍 A 獲勝色</option>
+                            <option value="B" ${round.roundWinnerOverride === 'B' ? 'selected' : ''}>隊伍 B 獲勝色</option>
+                            <option value="none" ${round.roundWinnerOverride === 'none' ? 'selected' : ''}>無底色 (白底)</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <span class="text-xs font-medium text-indigo-900">本局小計：</span>
+                        <input type="text" id="inp-round-score-a" value="${escapeHtml(round.roundScoreA)}" class="w-9 text-center text-xs border border-indigo-300 rounded px-1 py-1 bg-white" placeholder="A">
+                        <span class="text-xs font-bold">:</span>
+                        <input type="text" id="inp-round-score-b" value="${escapeHtml(round.roundScoreB)}" class="w-9 text-center text-xs border border-indigo-300 rounded px-1 py-1 bg-white" placeholder="B">
+                    </div>
                 </div>
             `;
             container.appendChild(roundSummaryBar);
+
+            roundSummaryBar.querySelector('#sel-round-win-override').addEventListener('change', (e) => {
+                round.roundWinnerOverride = e.target.value;
+                renderPreviewTable();
+            });
 
             // 綁定「本大局換邊」按鈕：將該大局（含上半場與下半場）的 A、B 兩隊格子內容（監管者與求生者、以及比分）直接互換
             roundSummaryBar.querySelector('#btn-swap-round-sides').addEventListener('click', () => {
@@ -1100,6 +1497,8 @@
                 const tempRoundScore = round.roundScoreA;
                 round.roundScoreA = round.roundScoreB;
                 round.roundScoreB = tempRoundScore;
+                if (round.bgOverride === 'teamA') round.bgOverride = 'teamB';
+                else if (round.bgOverride === 'teamB') round.bgOverride = 'teamA';
 
                 renderActiveRoundEditor();
                 renderPreviewTable();
@@ -1326,11 +1725,73 @@
                 appState.settings.showEmptyStructure = e.target.checked;
                 renderPreviewTable();
             });
+
+            // 隊伍顏色與獲勝變色設定事件
+            const colorAInput = document.getElementById('opt-color-team-a');
+            const colorAHex = document.getElementById('opt-color-team-a-hex');
+            const colorBInput = document.getElementById('opt-color-team-b');
+            const colorBHex = document.getElementById('opt-color-team-b-hex');
+
+            colorAInput.addEventListener('input', (e) => {
+                appState.settings.teamAColor = e.target.value;
+                colorAHex.value = e.target.value;
+                renderPreviewTable();
+            });
+            colorAHex.addEventListener('input', (e) => {
+                const val = e.target.value.trim();
+                if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                    appState.settings.teamAColor = val;
+                    colorAInput.value = val;
+                    renderPreviewTable();
+                }
+            });
+            colorBInput.addEventListener('input', (e) => {
+                appState.settings.teamBColor = e.target.value;
+                colorBHex.value = e.target.value;
+                renderPreviewTable();
+            });
+            colorBHex.addEventListener('input', (e) => {
+                const val = e.target.value.trim();
+                if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                    appState.settings.teamBColor = val;
+                    colorBInput.value = val;
+                    renderPreviewTable();
+                }
+            });
+            document.getElementById('btn-reset-colors').addEventListener('click', () => {
+                appState.settings.teamAColor = '#d59ba6';
+                appState.settings.teamBColor = '#9eb48d';
+                colorAInput.value = '#d59ba6';
+                colorAHex.value = '#d59ba6';
+                colorBInput.value = '#9eb48d';
+                colorBHex.value = '#9eb48d';
+                renderPreviewTable();
+                showToast('已恢復預設經典粉綠配色');
+            });
+
+            document.getElementById('opt-round-win-style').addEventListener('change', (e) => {
+                appState.settings.roundWinHighlight = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-round-win-tint').addEventListener('change', (e) => {
+                appState.settings.roundWinTint = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-winner-row-color').addEventListener('change', (e) => {
+                appState.settings.winnerRowColor = e.target.checked;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-winner-color-override').addEventListener('change', (e) => {
+                appState.settings.winnerColorOverride = e.target.value;
+                renderPreviewTable();
+            });
+
             document.getElementById('chk-auto-score').addEventListener('change', (e) => {
                 appState.settings.autoCalculateScore = e.target.checked;
                 renderPreviewTable();
                 renderActiveRoundEditor();
             });
+
             document.getElementById('chk-fit-preview').addEventListener('change', () => {
                 adjustPreviewScale();
             });
@@ -1363,12 +1824,16 @@
             });
             document.getElementById('btn-win-a').addEventListener('click', () => {
                 appState.footer.winner = appState.header.teamA.trim() !== '' ? appState.header.teamA : '隊伍 A';
+                appState.settings.winnerColorOverride = 'A';
                 document.getElementById('inp-winner').value = appState.footer.winner;
+                document.getElementById('opt-winner-color-override').value = 'A';
                 renderPreviewTable();
             });
             document.getElementById('btn-win-b').addEventListener('click', () => {
                 appState.footer.winner = appState.header.teamB.trim() !== '' ? appState.header.teamB : '隊伍 B';
+                appState.settings.winnerColorOverride = 'B';
                 document.getElementById('inp-winner').value = appState.footer.winner;
+                document.getElementById('opt-winner-color-override').value = 'B';
                 renderPreviewTable();
             });
             document.getElementById('inp-final-a').addEventListener('input', (e) => {
@@ -1391,6 +1856,7 @@
                     roundNumber: nextNum,
                     roundScoreA: '',
                     roundScoreB: '',
+                    roundWinnerOverride: 'auto',
                     halves: [
                         {
                             halfName: '上',
@@ -1503,6 +1969,32 @@
                 document.body.removeChild(textarea);
             });
 
+            // 核心高畫質圖片產生器：優先使用 modern-screenshot (原生瀏覽器 SVG 渲染，無文字位移與壓線問題)
+            async function captureTablePngDataUrl() {
+                const wrapper = document.getElementById('export-wrapper');
+                const bgColor = appState.settings.theme === 'dark' ? '#1c1c1c' : '#ffffff';
+
+                if (document.fonts && document.fonts.ready) {
+                    await document.fonts.ready;
+                }
+
+                if (window.modernScreenshot && typeof window.modernScreenshot.domToPng === 'function') {
+                    return await window.modernScreenshot.domToPng(wrapper, {
+                        scale: 2,
+                        backgroundColor: bgColor
+                    });
+                }
+
+                // 備援方案
+                const canvas = await html2canvas(wrapper, {
+                    scale: 2,
+                    backgroundColor: bgColor,
+                    useCORS: true,
+                    logging: false
+                });
+                return canvas.toDataURL('image/png');
+            }
+
             // 下載高畫質 PNG 圖片
             document.getElementById('btn-export-png').addEventListener('click', async () => {
                 const wrapper = document.getElementById('export-wrapper');
@@ -1511,14 +2003,7 @@
                 wrapper.classList.add('exporting');
                 try {
                     showToast('正在產生高解析度 PNG 圖片...');
-                    const bgColor = appState.settings.theme === 'dark' ? '#1c1c1c' : '#ffffff';
-                    const canvas = await html2canvas(wrapper, {
-                        scale: 2,
-                        backgroundColor: bgColor,
-                        useCORS: true,
-                        logging: false
-                    });
-                    const dataUrl = canvas.toDataURL('image/png');
+                    const dataUrl = await captureTablePngDataUrl();
                     const link = document.createElement('a');
                     const teamAFile = appState.header.teamA.trim() || '隊伍A';
                     const teamBFile = appState.header.teamB.trim() || '隊伍B';
@@ -1547,30 +2032,20 @@
                 wrapper.classList.add('exporting');
                 try {
                     showToast('正在轉換圖片至剪貼簿...');
-                    const bgColor = appState.settings.theme === 'dark' ? '#1c1c1c' : '#ffffff';
-                    const canvas = await html2canvas(wrapper, {
-                        scale: 2,
-                        backgroundColor: bgColor,
-                        useCORS: true,
-                        logging: false
-                    });
-                    canvas.toBlob(async (blob) => {
-                        if (!blob) {
-                            showToast('圖片轉換失敗', 'error');
-                            return;
+                    const dataUrl = await captureTablePngDataUrl();
+                    const res = await fetch(dataUrl);
+                    const blob = await res.blob();
+                    try {
+                        if (navigator.clipboard && window.ClipboardItem) {
+                            const item = new ClipboardItem({ 'image/png': blob });
+                            await navigator.clipboard.write([item]);
+                            showToast('圖片已複製到剪貼簿！可直接 Ctrl+V 貼上', 'success');
+                        } else {
+                            showToast('您的瀏覽器環境限制剪貼簿寫入，請點擊「下載 PNG 圖片」', 'error');
                         }
-                        try {
-                            if (navigator.clipboard && window.ClipboardItem) {
-                                const item = new ClipboardItem({ 'image/png': blob });
-                                await navigator.clipboard.write([item]);
-                                showToast('圖片已複製到剪貼簿！可直接 Ctrl+V 貼上', 'success');
-                            } else {
-                                showToast('您的瀏覽器環境限制剪貼簿寫入，請點擊「下載 PNG 圖片」', 'error');
-                            }
-                        } catch (clipErr) {
-                            showToast('因瀏覽器權限限制無法直接複製圖片，請使用右側「下載 PNG 圖片」按鈕', 'error');
-                        }
-                    }, 'image/png');
+                    } catch (clipErr) {
+                        showToast('因瀏覽器權限限制無法直接複製圖片，請使用右側「下載 PNG 圖片」按鈕', 'error');
+                    }
                 } catch (error) {
                     console.error(error);
                     showToast('處理圖片時發生錯誤', 'error');
