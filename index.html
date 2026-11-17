@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第五人格賽事對局表格生成器</title>
+    <!-- 引入 Tailwind CSS 作為控制面板樣式框架 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 html2canvas 供高品質圖片匯出 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- 引入 Google Fonts 確保中英文字體美觀與跨平台一致 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --font-sans: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --font-serif: 'Noto Serif TC', "PMingLiU", "SimSun", serif;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: #f1f5f9;
+            color: #0f172a;
+        }
+
+        /* 匯出畫布與表格專用精確樣式，避免 Tailwind 預設重置干擾表格邊框 */
+        #export-wrapper {
+            background-color: #ffffff;
+            display: inline-block;
+            box-sizing: border-box;
+        }
+
+        .match-table {
+            width: 960px;
+            border-collapse: collapse;
+            table-layout: fixed;
+            box-sizing: border-box;
+            line-height: 1.45;
+            user-select: text;
+        }
+
+        .match-table th,
+        .match-table td {
+            border: 1.5px solid #000000;
+            padding: 8px 10px;
+            text-align: center;
+            vertical-align: middle;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            box-sizing: border-box;
+        }
+
+        /* 經典粉綠亮色主題（對應參考圖2） */
+        .theme-classic {
+            background-color: #ffffff;
+            color: #000000;
+            font-family: var(--font-sans);
+        }
+        .theme-classic th,
+        .theme-classic td {
+            border-color: #000000;
+        }
+        .theme-classic .header-date {
+            background-color: #d3d3d3;
+            color: #000000;
+            font-family: var(--font-serif);
+            font-weight: 700;
+            font-size: 20px;
+            letter-spacing: 1px;
+        }
+        .theme-classic .header-team-a {
+            background-color: #d59ba6;
+            color: #000000;
+            font-size: 22px;
+            font-weight: 500;
+            letter-spacing: 1px;
+        }
+        .theme-classic .header-team-b {
+            background-color: #9eb48d;
+            color: #000000;
+            font-size: 22px;
+            font-weight: 500;
+            letter-spacing: 1px;
+        }
+        .theme-classic .header-stage {
+            background-color: #d3d3d3;
+            color: #000000;
+            font-family: var(--font-serif);
+            font-weight: 700;
+            font-size: 18px;
+        }
+        .theme-classic .half-label {
+            font-family: var(--font-serif);
+            font-weight: 700;
+            font-size: 19px;
+            margin-bottom: 2px;
+        }
+        .theme-classic .footer-winner {
+            font-size: 22px;
+            font-weight: 500;
+            padding: 10px;
+        }
+        .theme-classic .footer-score {
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        /* 黑底白字深色賽事主題（對應參考圖1） */
+        .theme-dark {
+            background-color: #1c1c1c;
+            color: #ffffff;
+            font-family: var(--font-serif);
+        }
+        .theme-dark th,
+        .theme-dark td {
+            border-color: #d4d4d4;
+            background-color: #1c1c1c;
+            color: #ffffff;
+        }
+        .theme-dark .header-date {
+            font-family: var(--font-sans);
+            font-weight: 900;
+            font-size: 32px;
+            letter-spacing: 1px;
+            padding: 16px 8px;
+        }
+        .theme-dark .header-team-a,
+        .theme-dark .header-team-b {
+            font-family: var(--font-sans);
+            font-weight: 900;
+            font-size: 40px;
+            letter-spacing: 1px;
+            padding: 16px 8px;
+        }
+        .theme-dark .header-stage {
+            font-family: var(--font-serif);
+            font-weight: 700;
+            font-size: 20px;
+        }
+        .theme-dark .half-label {
+            font-weight: 700;
+            font-size: 17px;
+            margin-bottom: 4px;
+        }
+        .theme-dark .score-cell {
+            font-family: var(--font-sans);
+            font-weight: 800;
+            font-size: 18px;
+        }
+        .theme-dark .footer-winner {
+            font-family: var(--font-sans);
+            font-size: 38px;
+            font-weight: 900;
+            padding: 14px;
+        }
+        .theme-dark .footer-score {
+            font-family: var(--font-sans);
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        /* 畫布內可直接點擊編輯的樣式提示 */
+        [contenteditable="true"] {
+            outline: none;
+            border-radius: 2px;
+            transition: background-color 0.15s ease;
+        }
+        [contenteditable="true"]:hover {
+            background-color: rgba(59, 130, 246, 0.12);
+        }
+        [contenteditable="true"]:focus {
+            background-color: rgba(59, 130, 246, 0.2);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+        }
+
+        /* 匯出時移除所有編輯框輔助視覺 */
+        .exporting [contenteditable="true"]:hover,
+        .exporting [contenteditable="true"]:focus {
+            background-color: transparent !important;
+            box-shadow: none !important;
+        }
+
+        /* 自訂捲軸 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- 頂部導覽與工具列 -->
+    <header class="bg-slate-900 text-white shadow-md sticky top-0 z-30">
+        <div class="max-w-[1600px] mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-3 h-6 bg-indigo-500 rounded-sm"></div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-wide">賽事對局與 BP 表格圖片生成器</h1>
+                    <p class="text-xs text-slate-400">支援左側表單輸入與右側表格直接點擊修改，一鍵匯出無裁切高畫質 PNG 圖片</p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <button id="btn-load-template" type="button" class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded transition">
+                    載入空白預設範本
+                </button>
+                <button id="btn-load-demo" type="button" class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded transition">
+                    載入實戰範例數據
+                </button>
+                <button id="btn-copy-tsv" type="button" class="px-3 py-1.5 text-xs font-medium bg-emerald-800 hover:bg-emerald-700 text-emerald-100 border border-emerald-600 rounded transition">
+                    複製為 Google 試算表格式 (TSV)
+                </button>
+                <button id="btn-download-html" type="button" class="px-3 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-white rounded transition" title="下載此網頁原始碼，可直接上傳至 GitHub 專案庫">
+                    下載 index.html (供 GitHub 部署)
+                </button>
+                <div class="h-5 w-[1px] bg-slate-700 mx-1 hidden sm:block"></div>
+                <button id="btn-copy-img" type="button" class="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded shadow transition">
+                    複製圖片至剪貼簿
+                </button>
+                <button id="btn-export-png" type="button" class="px-4 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded shadow transition">
+                    下載 PNG 圖片
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 狀態通知橫幅 -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- 主內容區：左側控制面板 + 右側即時預覽區 -->
+    <main class="flex-1 max-w-[1600px] w-full mx-auto p-4 grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+
+        <!-- 左側：結構化資料輸入面板 (佔 5 欄) -->
+        <section class="xl:col-span-5 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[calc(100vh-90px)]">
+            <!-- 面板分頁切換 -->
+            <div class="bg-slate-100 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between">
+                <span class="text-sm font-bold text-slate-700">資料與外觀設定面板</span>
+                <div class="flex items-center gap-2">
+                    <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                        <input type="checkbox" id="chk-auto-score" checked class="rounded text-indigo-600 focus:ring-indigo-500">
+                        <span>自動加總局比分與總分</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 可捲動表單內容 -->
+            <div class="p-4 overflow-y-auto space-y-5 flex-1" id="form-scroll-container">
+
+                <!-- 1. 視覺與格式偏好設定 -->
+                <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-3">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">表格風格與格式選項</h2>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">配色主題</label>
+                            <select id="opt-theme" class="w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-indigo-500">
+                                <option value="classic">經典粉綠版 (白底黑字)</option>
+                                <option value="dark">深色賽事版 (黑底白字)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">半場標題格式</label>
+                            <select id="opt-half-format" class="w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-indigo-500">
+                                <option value="short">簡稱 (1上 / 1下)</option>
+                                <option value="full">完整 (第1局上半場)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">求生禁用連接符</label>
+                            <select id="opt-ban-sep" class="w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-indigo-500">
+                                <option value="slash-gt">Ban:A/B&gt;C&gt;D (附圖格式)</option>
+                                <option value="comma-gt">A、B&gt;C&gt;D (無Ban字樣)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-4 pt-1">
+                        <label class="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                            <input type="checkbox" id="opt-map-strike" checked class="rounded text-indigo-600">
+                            <span>禁用地圖加上刪除線</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                            <input type="checkbox" id="opt-pick-underline" class="rounded text-indigo-600">
+                            <span>選用角色加上底線</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                            <input type="checkbox" id="opt-show-empty-ban" checked class="rounded text-indigo-600">
+                            <span>空白時保留符號結構 (如 | | | 與 Ban:/&gt;&gt;)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 2. 表頭與全域賽事資訊 -->
+                <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-3">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">表頭與勝負結果</h2>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">左上欄位 (日期/時間)</label>
+                            <input type="text" id="inp-date" class="w-full text-xs border border-slate-300 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="例如：日期 或 14 : 00">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">隊伍 A 名稱</label>
+                            <input type="text" id="inp-team-a" class="w-full text-xs border border-slate-300 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="隊伍 A">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">隊伍 B 名稱</label>
+                            <input type="text" id="inp-team-b" class="w-full text-xs border border-slate-300 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="隊伍 B">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">右上欄位 (賽制/比分)</label>
+                            <input type="text" id="inp-stage" class="w-full text-xs border border-slate-300 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="常規 or 決賽">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1">
+                        <div class="sm:col-span-2">
+                            <label class="block text-xs font-medium text-slate-700 mb-1">底部獲勝隊伍顯示</label>
+                            <div class="flex gap-1.5">
+                                <input type="text" id="inp-winner" class="flex-1 text-xs border border-slate-300 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="勝者">
+                                <button type="button" id="btn-win-a" class="px-2 py-1 text-xs bg-rose-100 hover:bg-rose-200 text-rose-900 rounded border border-rose-300 transition">帶入隊伍A</button>
+                                <button type="button" id="btn-win-b" class="px-2 py-1 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded border border-emerald-300 transition">帶入隊伍B</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-700 mb-1">最終總比分 (A : B)</label>
+                            <div class="flex items-center gap-1">
+                                <input type="text" id="inp-final-a" class="w-full text-center text-xs border border-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="A">
+                                <span class="text-xs font-bold text-slate-500">:</span>
+                                <input type="text" id="inp-final-b" class="w-full text-center text-xs border border-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500" placeholder="B">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 各局詳細資料動態表單區 -->
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">各局對局明細設定</h2>
+                        <div class="flex gap-1.5">
+                            <button type="button" id="btn-add-round" class="px-2.5 py-1 text-xs font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded transition">
+                                + 新增第 4 / 5 局 (加賽)
+                            </button>
+                            <button type="button" id="btn-remove-round" class="px-2.5 py-1 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300 rounded transition">
+                                - 移除末局
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 局數切換 Tabs -->
+                    <div id="round-tabs" class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2"></div>
+
+                    <!-- 當前選中局數的編輯容器 -->
+                    <div id="round-editor-container" class="space-y-4"></div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- 右側：即時預覽與匯出畫布區 (佔 7 欄) -->
+        <section class="xl:col-span-7 flex flex-col gap-3">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-2 border-b border-slate-100">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-bold text-slate-700">即時表格預覽</span>
+                        <span class="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded">
+                            提示：可直接點擊下方表格內的任何文字進行微調
+                        </span>
+                    </div>
+                    <span class="text-xs text-slate-400">匯出解析度：1920px 寬 (2x 高清縮放)</span>
+                </div>
+
+                <!-- 水平捲軸容器，確保手機或小螢幕也能完整檢視與匯出標準寬度表格 -->
+                <div class="overflow-x-auto pb-2 flex justify-center bg-slate-100 p-4 rounded-lg border border-slate-200">
+                    <!-- 實際被 html2canvas 擷取的目標容器 -->
+                    <div id="export-wrapper">
+                        <table id="match-table" class="match-table theme-classic">
+                            <colgroup>
+                                <col style="width: 16.5%;">
+                                <col style="width: 35.5%;">
+                                <col style="width: 35.5%;">
+                                <col style="width: 6.25%;">
+                                <col style="width: 6.25%;">
+                            </colgroup>
+                            <thead id="table-head"></thead>
+                            <tbody id="table-body"></tbody>
+                            <tfoot id="table-foot"></tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        /**
+         * 應用程式核心狀態管理與預設範本
+         * 確保所有欄位皆可雙向綁定、零錯誤渲染與匯出
+         */
+        let activeRoundIndex = 0;
+
+        // 建立與使用者上傳之「空白結構參考圖」100% 一致的預設資料
+        function createTemplateState() {
+            return {
+                settings: {
+                    theme: 'classic',           // 'classic' | 'dark'
+                    halfFormat: 'short',        // 'short' (1上) | 'full' (第1局上半場)
+                    banSeparator: 'slash-gt',   // 'slash-gt' (Ban:A/B>C>D) | 'comma-gt' (A、B>C>D)
+                    mapStrikethrough: true,
+                    pickUnderline: false,
+                    showEmptyStructure: true,
+                    autoCalculateScore: true
+                },
+                header: {
+                    date: '日期',
+                    teamA: '隊伍 A',
+                    teamB: '隊伍 B',
+                    stage: '常規 or 決賽'
+                },
+                footer: {
+                    winner: '勝者',
+                    finalScoreA: '',
+                    finalScoreB: ''
+                },
+                rounds: [
+                    // 第 1 局
+                    {
+                        roundNumber: 1,
+                        roundScoreA: '',
+                        roundScoreB: '',
+                        halves: [
+                            {
+                                halfName: '上',
+                                mapPick: '地圖名稱',
+                                mapBan: '禁用 A/禁用 B',
+                                teamARole: 'survivor', // 'survivor' | 'hunter'
+                                survivorsPick: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                survivorsBan: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                hunterPick: '屠夫',
+                                hunterPlayer: '',
+                                huntersBan: [],
+                                showHunterBanLine: false,
+                                hunterBanTemplate: '',
+                                scoreA: '',
+                                scoreB: ''
+                            },
+                            {
+                                halfName: '下',
+                                mapPick: '地圖名稱',
+                                mapBan: '禁用 A/禁用 B',
+                                teamARole: 'hunter',
+                                survivorsPick: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                survivorsBan: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                hunterPick: '屠夫',
+                                hunterPlayer: '',
+                                huntersBan: [],
+                                showHunterBanLine: false,
+                                hunterBanTemplate: '',
+                                scoreA: '',
+                                scoreB: ''
+                            }
+                        ]
+                    },
+                    // 第 2 局
+                    {
+                        roundNumber: 2,
+                        roundScoreA: '',
+                        roundScoreB: '',
+                        halves: [
+                            {
+                                halfName: '上',
+                                mapPick: '地圖名稱',
+                                mapBan: '禁用 A/禁用 B',
+                                teamARole: 'survivor',
+                                survivorsPick: ['', '', '', ''],
+                                survivorsBan: ['', '', '', ''],
+                                hunterPick: '屠夫',
+                                hunterPlayer: '',
+                                huntersBan: [''],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:',
+                                scoreA: '',
+                                scoreB: ''
+                            },
+                            {
+                                halfName: '下',
+                                mapPick: '地圖名稱',
+                                mapBan: '禁用 A/禁用 B',
+                                teamARole: 'hunter',
+                                survivorsPick: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                survivorsBan: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                hunterPick: '屠夫',
+                                hunterPlayer: '',
+                                huntersBan: [''],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:',
+                                scoreA: '',
+                                scoreB: ''
+                            }
+                        ]
+                    },
+                    // 第 3 局
+                    {
+                        roundNumber: 3,
+                        roundScoreA: '',
+                        roundScoreB: '',
+                        halves: [
+                            {
+                                halfName: '上',
+                                mapPick: '地圖名稱',
+                                mapBan: '禁用 A',
+                                teamARole: 'survivor',
+                                survivorsPick: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                survivorsBan: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                hunterPick: '屠夫',
+                                hunterPlayer: '',
+                                huntersBan: ['', ''],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:/',
+                                scoreA: '',
+                                scoreB: ''
+                            },
+                            {
+                                halfName: '下',
+                                mapPick: '地圖名稱',
+                                mapBan: '禁用 A',
+                                teamARole: 'hunter',
+                                survivorsPick: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                survivorsBan: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                                hunterPick: '屠夫',
+                                hunterPlayer: '',
+                                huntersBan: ['', ''],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:/',
+                                scoreA: '',
+                                scoreB: ''
+                            }
+                        ]
+                    }
+                ]
+            };
+        }
+
+        // 建立實戰範例資料（方便使用者測試實際角色名稱與自動算分）
+        function createDemoState() {
+            return {
+                settings: {
+                    theme: 'classic',
+                    halfFormat: 'short',
+                    banSeparator: 'slash-gt',
+                    mapStrikethrough: true,
+                    pickUnderline: false,
+                    showEmptyStructure: true,
+                    autoCalculateScore: true
+                },
+                header: {
+                    date: '14 : 00',
+                    teamA: '北京WBG',
+                    teamB: 'Gr',
+                    stage: '常規賽'
+                },
+                footer: {
+                    winner: 'Gr',
+                    finalScoreA: '10',
+                    finalScoreB: '15'
+                },
+                rounds: [
+                    {
+                        roundNumber: 1,
+                        roundScoreA: '4',
+                        roundScoreB: '4',
+                        halves: [
+                            {
+                                halfName: '上',
+                                mapPick: '永眠鎮',
+                                mapBan: '里奧/唐人街',
+                                teamARole: 'survivor',
+                                survivorsPick: ['祭司', '木偶師', '古董商', '大副'],
+                                survivorsBan: ['逃脫大師', '幻燈師', '守墓人', '野人'],
+                                hunterPick: '牙醫',
+                                hunterPlayer: '夢幻小彌',
+                                huntersBan: [],
+                                showHunterBanLine: false,
+                                hunterBanTemplate: '',
+                                scoreA: '2',
+                                scoreB: '2'
+                            },
+                            {
+                                halfName: '下',
+                                mapPick: '永眠鎮',
+                                mapBan: '里奧/唐人街',
+                                teamARole: 'hunter',
+                                survivorsPick: ['古董商', '逃脫大師', '飛行家', '作曲家'],
+                                survivorsBan: ['弓箭手', '幻燈師', '氣象學家', '幸運兒'],
+                                hunterPick: '女王蜂',
+                                hunterPlayer: '無桼',
+                                huntersBan: [],
+                                showHunterBanLine: false,
+                                hunterBanTemplate: '',
+                                scoreA: '2',
+                                scoreB: '2'
+                            }
+                        ]
+                    },
+                    {
+                        roundNumber: 2,
+                        roundScoreA: '4',
+                        roundScoreB: '4',
+                        halves: [
+                            {
+                                halfName: '上',
+                                mapPick: '月亮河公園',
+                                mapBan: '湖景村',
+                                teamARole: 'hunter',
+                                survivorsPick: ['傭兵', '幻燈師', '園丁', '默劇藝人'],
+                                survivorsBan: ['氣象學家', '弓箭手', '鬥牛士', '病患'],
+                                hunterPick: '歌劇演員',
+                                hunterPlayer: '捏捏',
+                                huntersBan: ['跛腳羊'],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:',
+                                scoreA: '2',
+                                scoreB: '2'
+                            },
+                            {
+                                halfName: '下',
+                                mapPick: '月亮河公園',
+                                mapBan: '湖景村',
+                                teamARole: 'survivor',
+                                survivorsPick: ['病患', '鬥牛士', '玩具商', '傭兵'],
+                                survivorsBan: ['氣象學家', '弓箭手', '心理學家', '逃脫大師'],
+                                hunterPick: '歌劇演員',
+                                hunterPlayer: '夢幻小彌',
+                                huntersBan: ['跛腳羊'],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:',
+                                scoreA: '2',
+                                scoreB: '2'
+                            }
+                        ]
+                    },
+                    {
+                        roundNumber: 3,
+                        roundScoreA: '2',
+                        roundScoreB: '7',
+                        halves: [
+                            {
+                                halfName: '上',
+                                mapPick: '紅教堂',
+                                mapBan: '里奧的回憶',
+                                teamARole: 'survivor',
+                                survivorsPick: ['守墓人', '法羅女士', '弓箭手', '心理學家'],
+                                survivorsBan: ['幸運兒', '逃脫大師', '飛行家', '教授'],
+                                hunterPick: '雜貨商',
+                                hunterPlayer: '夢幻小彌',
+                                huntersBan: ['跛腳羊', '女王蜂'],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:/',
+                                scoreA: '2',
+                                scoreB: '2'
+                            },
+                            {
+                                halfName: '下',
+                                mapPick: '紅教堂',
+                                mapBan: '里奧的回憶',
+                                teamARole: 'hunter',
+                                survivorsPick: ['大副', '弓箭手', '氣象學家', '心理學家'],
+                                survivorsBan: ['幸運兒', '咒術師', '先知', '木偶師'],
+                                hunterPick: '跛腳羊',
+                                hunterPlayer: '捏捏',
+                                huntersBan: ['跛腳羊', '台球手'],
+                                showHunterBanLine: true,
+                                hunterBanTemplate: 'Ban:/',
+                                scoreA: '0',
+                                scoreB: '5'
+                            }
+                        ]
+                    }
+                ]
+            };
+        }
+
+        let appState = createTemplateState();
+
+        // 顯示右上/右下提示訊息
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const bgClass = type === 'success' ? 'bg-emerald-700' : (type === 'error' ? 'bg-rose-700' : 'bg-slate-800');
+            toast.className = `${bgClass} text-white text-xs font-medium px-4 py-2.5 rounded-lg shadow-lg transition-opacity duration-300 pointer-events-auto`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 2600);
+        }
+
+        // 自動計算各局比分與總比分
+        function recalculateScoresIfNeeded() {
+            if (!appState.settings.autoCalculateScore) return;
+
+            let totalA = 0;
+            let totalB = 0;
+            let hasAnyValidScore = false;
+
+            appState.rounds.forEach(round => {
+                const h1A = parseInt(round.halves[0].scoreA, 10);
+                const h1B = parseInt(round.halves[0].scoreB, 10);
+                const h2A = parseInt(round.halves[1].scoreA, 10);
+                const h2B = parseInt(round.halves[1].scoreB, 10);
+
+                if (!isNaN(h1A) || !isNaN(h2A)) {
+                    const sumA = (isNaN(h1A) ? 0 : h1A) + (isNaN(h2A) ? 0 : h2A);
+                    round.roundScoreA = String(sumA);
+                    totalA += sumA;
+                    hasAnyValidScore = true;
+                } else {
+                    round.roundScoreA = '';
+                }
+
+                if (!isNaN(h1B) || !isNaN(h2B)) {
+                    const sumB = (isNaN(h1B) ? 0 : h1B) + (isNaN(h2B) ? 0 : h2B);
+                    round.roundScoreB = String(sumB);
+                    totalB += sumB;
+                    hasAnyValidScore = true;
+                } else {
+                    round.roundScoreB = '';
+                }
+            });
+
+            if (hasAnyValidScore) {
+                appState.footer.finalScoreA = String(totalA);
+                appState.footer.finalScoreB = String(totalB);
+            } else {
+                appState.footer.finalScoreA = '';
+                appState.footer.finalScoreB = '';
+            }
+        }
+
+        // 格式化求生者選角字串
+        function formatSurvivorPicks(picks) {
+            const hasContent = picks.some(p => p && p.trim() !== '');
+            if (!hasContent && !appState.settings.showEmptyStructure) {
+                return '';
+            }
+            return `${picks[0] || ''} | ${picks[1] || ''} | ${picks[2] || ''} | ${picks[3] || ''}`;
+        }
+
+        // 格式化求生者禁用字串
+        function formatSurvivorBans(bans) {
+            const hasContent = bans.some(b => b && b.trim() !== '');
+            if (!hasContent && !appState.settings.showEmptyStructure) {
+                return '';
+            }
+            const b0 = bans[0] || '';
+            const b1 = bans[1] || '';
+            const b2 = bans[2] || '';
+            const b3 = bans[3] || '';
+
+            if (appState.settings.banSeparator === 'slash-gt') {
+                return `Ban:${b0}/${b1}>${b2}>${b3}`;
+            } else {
+                return `${b0}、${b1}>${b2}>${b3}`;
+            }
+        }
+
+        // 格式化監管者選角字串
+        function formatHunterPick(half) {
+            const pick = half.hunterPick || '';
+            const player = half.hunterPlayer ? `（${half.hunterPlayer}）` : '';
+            if (appState.settings.pickUnderline && pick) {
+                return `<span style="text-decoration: underline; text-underline-offset: 3px;">${escapeHtml(pick)}</span>${escapeHtml(player)}`;
+            }
+            return `${escapeHtml(pick)}${escapeHtml(player)}`;
+        }
+
+        // 格式化監管者禁用字串
+        function formatHunterBans(half, roundNumber) {
+            if (!half.showHunterBanLine) return '';
+            const validBans = (half.huntersBan || []).filter(b => b !== undefined);
+            const allEmpty = validBans.every(b => b.trim() === '');
+
+            if (allEmpty) {
+                if (!appState.settings.showEmptyStructure) return '';
+                if (roundNumber === 2) return 'Ban:';
+                if (roundNumber >= 3) return 'Ban:/';
+                return '';
+            }
+
+            if (appState.settings.banSeparator === 'slash-gt') {
+                return 'Ban:' + validBans.filter(b => b.trim() !== '').join('/');
+            } else {
+                return validBans.filter(b => b.trim() !== '').join('、');
+            }
+        }
+
+        // HTML 跳脫處理防止渲染破版
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // 格式化比分顯示 (如 "2:2" 或空白時僅顯示 ":")
+        function formatScoreDisplay(scoreA, scoreB) {
+            const a = (scoreA !== undefined && scoreA !== null) ? String(scoreA).trim() : '';
+            const b = (scoreB !== undefined && scoreB !== null) ? String(scoreB).trim() : '';
+            if (a === '' && b === '') return ':';
+            return `${a}:${b}`;
+        }
+
+        /**
+         * 渲染右側匯出專用 HTML 表格
+         */
+        function renderPreviewTable() {
+            recalculateScoresIfNeeded();
+
+            const table = document.getElementById('match-table');
+            table.className = `match-table ${appState.settings.theme === 'dark' ? 'theme-dark' : 'theme-classic'}`;
+
+            // 1. 渲染 Thead
+            const thead = document.getElementById('table-head');
+            thead.innerHTML = `
+                <tr>
+                    <th class="header-date">
+                        <div contenteditable="true" data-bind="header.date">${escapeHtml(appState.header.date)}</div>
+                    </th>
+                    <th class="header-team-a">
+                        <div contenteditable="true" data-bind="header.teamA">${escapeHtml(appState.header.teamA)}</div>
+                    </th>
+                    <th class="header-team-b">
+                        <div contenteditable="true" data-bind="header.teamB">${escapeHtml(appState.header.teamB)}</div>
+                    </th>
+                    <th colspan="2" class="header-stage">
+                        <div contenteditable="true" data-bind="header.stage">${escapeHtml(appState.header.stage)}</div>
+                    </th>
+                </tr>
+            `;
+
+            // 2. 渲染 Tbody (各局上下半場)
+            const tbody = document.getElementById('table-body');
+            let tbodyHtml = '';
+
+            appState.rounds.forEach((round, rIdx) => {
+                round.halves.forEach((half, hIdx) => {
+                    const halfTitle = appState.settings.halfFormat === 'short'
+                        ? `${round.roundNumber}${half.halfName}`
+                        : `第${round.roundNumber}局${half.halfName}半場`;
+
+                    const mapPickDisplay = half.mapPick ? `【${escapeHtml(half.mapPick)}】` : '【】';
+                    const strikeStyle = appState.settings.mapStrikethrough
+                        ? 'text-decoration: line-through;'
+                        : '';
+
+                    // 產生求生者陣營儲存格內容
+                    const survLine1Raw = formatSurvivorPicks(half.survivorsPick);
+                    const survLine1Html = appState.settings.pickUnderline && survLine1Raw.trim() !== '|  |'
+                        ? `<span style="text-decoration: underline; text-underline-offset: 3px;">${escapeHtml(survLine1Raw)}</span>`
+                        : escapeHtml(survLine1Raw);
+                    const survLine2Html = escapeHtml(formatSurvivorBans(half.survivorsBan));
+
+                    const survivorCellHtml = `
+                        <div class="space-y-1 py-1">
+                            <div contenteditable="true" class="text-[15px] tracking-wide">${survLine1Html}</div>
+                            <div contenteditable="true" class="text-[14px] tracking-wide">${survLine2Html}</div>
+                        </div>
+                    `;
+
+                    // 產生監管者陣營儲存格內容
+                    const hunterLine1Html = formatHunterPick(half);
+                    const hunterBanText = formatHunterBans(half, round.roundNumber);
+                    const hunterCellHtml = `
+                        <div class="space-y-1 py-1">
+                            <div contenteditable="true" class="text-[15px] tracking-wide">${hunterLine1Html}</div>
+                            ${hunterBanText !== '' ? `<div contenteditable="true" class="text-[14px] tracking-wide">${escapeHtml(hunterBanText)}</div>` : ''}
+                        </div>
+                    `;
+
+                    const teamACellContent = half.teamARole === 'survivor' ? survivorCellHtml : hunterCellHtml;
+                    const teamBCellContent = half.teamARole === 'survivor' ? hunterCellHtml : survivorCellHtml;
+
+                    const halfScoreStr = formatScoreDisplay(half.scoreA, half.scoreB);
+                    const roundScoreStr = formatScoreDisplay(round.roundScoreA, round.roundScoreB);
+
+                    tbodyHtml += `
+                        <tr>
+                            <td class="py-2.5">
+                                <div contenteditable="true" class="half-label">${escapeHtml(halfTitle)}</div>
+                                <div contenteditable="true" class="text-[15px] my-0.5">${mapPickDisplay}</div>
+                                <div contenteditable="true" class="text-[14px]" style="${strikeStyle}">${escapeHtml(half.mapBan)}</div>
+                            </td>
+                            <td>${teamACellContent}</td>
+                            <td>${teamBCellContent}</td>
+                            <td class="score-cell">
+                                <div contenteditable="true">${escapeHtml(halfScoreStr)}</div>
+                            </td>
+                            ${hIdx === 0 ? `
+                                <td rowspan="2" class="score-cell">
+                                    <div contenteditable="true">${escapeHtml(roundScoreStr)}</div>
+                                </td>
+                            ` : ''}
+                        </tr>
+                    `;
+                });
+            });
+
+            tbody.innerHTML = tbodyHtml;
+
+            // 3. 渲染 Tfoot (底部勝者與總比分)
+            const tfoot = document.getElementById('table-foot');
+            const finalScoreStr = formatScoreDisplay(appState.footer.finalScoreA, appState.footer.finalScoreB);
+            tfoot.innerHTML = `
+                <tr>
+                    <td colspan="3" class="footer-winner">
+                        <div contenteditable="true" data-bind="footer.winner">${escapeHtml(appState.footer.winner)}</div>
+                    </td>
+                    <td colspan="2" class="footer-score">
+                        <div contenteditable="true">${escapeHtml(finalScoreStr)}</div>
+                    </td>
+                </tr>
+            `;
+
+            // 同步更新左側總分輸入框顯示
+            document.getElementById('inp-final-a').value = appState.footer.finalScoreA;
+            document.getElementById('inp-final-b').value = appState.footer.finalScoreB;
+        }
+
+        /**
+         * 渲染左側控制面板
+         */
+        function renderControlPanel() {
+            // 同步基本設定與表頭輸入框
+            document.getElementById('opt-theme').value = appState.settings.theme;
+            document.getElementById('opt-half-format').value = appState.settings.halfFormat;
+            document.getElementById('opt-ban-sep').value = appState.settings.banSeparator;
+            document.getElementById('opt-map-strike').checked = appState.settings.mapStrikethrough;
+            document.getElementById('opt-pick-underline').checked = appState.settings.pickUnderline;
+            document.getElementById('opt-show-empty-ban').checked = appState.settings.showEmptyStructure;
+            document.getElementById('chk-auto-score').checked = appState.settings.autoCalculateScore;
+
+            document.getElementById('inp-date').value = appState.header.date;
+            document.getElementById('inp-team-a').value = appState.header.teamA;
+            document.getElementById('inp-team-b').value = appState.header.teamB;
+            document.getElementById('inp-stage').value = appState.header.stage;
+            document.getElementById('inp-winner').value = appState.footer.winner;
+            document.getElementById('inp-final-a').value = appState.footer.finalScoreA;
+            document.getElementById('inp-final-b').value = appState.footer.finalScoreB;
+
+            // 渲染局數切換按鈕 (Round Tabs)
+            const tabsContainer = document.getElementById('round-tabs');
+            tabsContainer.innerHTML = '';
+            if (activeRoundIndex >= appState.rounds.length) {
+                activeRoundIndex = appState.rounds.length - 1;
+            }
+
+            appState.rounds.forEach((round, idx) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                const isActive = idx === activeRoundIndex;
+                btn.className = isActive
+                    ? 'px-3 py-1.5 text-xs font-bold bg-indigo-600 text-white rounded shadow-sm transition'
+                    : 'px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition';
+                btn.textContent = `第 ${round.roundNumber} 局 (${round.roundNumber}上 / ${round.roundNumber}下)`;
+                btn.addEventListener('click', () => {
+                    activeRoundIndex = idx;
+                    renderControlPanel();
+                });
+                tabsContainer.appendChild(btn);
+            });
+
+            // 渲染當前選中局數的上下半場詳細表單
+            renderActiveRoundEditor();
+        }
+
+        function renderActiveRoundEditor() {
+            const container = document.getElementById('round-editor-container');
+            const round = appState.rounds[activeRoundIndex];
+            if (!round) return;
+
+            container.innerHTML = '';
+
+            // 本局總分與地圖快速同步列
+            const roundSummaryBar = document.createElement('div');
+            roundSummaryBar.className = 'bg-indigo-50/70 border border-indigo-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2';
+            roundSummaryBar.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-indigo-900">第 ${round.roundNumber} 局設定</span>
+                    <button type="button" id="btn-sync-map" class="px-2 py-1 text-xs bg-white hover:bg-indigo-100 text-indigo-700 border border-indigo-300 rounded transition">
+                        將上半場地圖複製至下半場
+                    </button>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-medium text-indigo-900">本局小計比分：</span>
+                    <input type="text" id="inp-round-score-a" value="${escapeHtml(round.roundScoreA)}" class="w-12 text-center text-xs border border-indigo-300 rounded px-1.5 py-1 bg-white" placeholder="A">
+                    <span class="text-xs font-bold">:</span>
+                    <input type="text" id="inp-round-score-b" value="${escapeHtml(round.roundScoreB)}" class="w-12 text-center text-xs border border-indigo-300 rounded px-1.5 py-1 bg-white" placeholder="B">
+                </div>
+            `;
+            container.appendChild(roundSummaryBar);
+
+            roundSummaryBar.querySelector('#btn-sync-map').addEventListener('click', () => {
+                round.halves[1].mapPick = round.halves[0].mapPick;
+                round.halves[1].mapBan = round.halves[0].mapBan;
+                renderActiveRoundEditor();
+                renderPreviewTable();
+                showToast(`已將第 ${round.roundNumber} 局上半場地圖同步至下半場`);
+            });
+
+            roundSummaryBar.querySelector('#inp-round-score-a').addEventListener('input', (e) => {
+                appState.settings.autoCalculateScore = false;
+                document.getElementById('chk-auto-score').checked = false;
+                round.roundScoreA = e.target.value;
+                renderPreviewTable();
+            });
+            roundSummaryBar.querySelector('#inp-round-score-b').addEventListener('input', (e) => {
+                appState.settings.autoCalculateScore = false;
+                document.getElementById('chk-auto-score').checked = false;
+                round.roundScoreB = e.target.value;
+                renderPreviewTable();
+            });
+
+            // 分別渲染上半場與下半場表單卡片
+            round.halves.forEach((half, hIdx) => {
+                const card = document.createElement('div');
+                card.className = 'bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3';
+
+                const survTeamLabel = half.teamARole === 'survivor' ? `隊伍 A (${appState.header.teamA})` : `隊伍 B (${appState.header.teamB})`;
+                const huntTeamLabel = half.teamARole === 'survivor' ? `隊伍 B (${appState.header.teamB})` : `隊伍 A (${appState.header.teamA})`;
+
+                card.innerHTML = `
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 text-xs font-bold bg-slate-800 text-white rounded">${round.roundNumber}${half.halfName}</span>
+                            <span class="text-xs text-slate-600">求生方：<strong class="text-slate-900">${escapeHtml(survTeamLabel)}</strong> ｜ 監管方：<strong class="text-slate-900">${escapeHtml(huntTeamLabel)}</strong></span>
+                        </div>
+                        <button type="button" class="btn-swap-role px-2.5 py-1 text-xs font-medium bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded shadow-sm transition">
+                            對調雙方陣營 (求生 ⇄ 屠夫)
+                        </button>
+                    </div>
+
+                    <!-- 地圖與本半場比分 -->
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                        <div class="sm:col-span-4">
+                            <label class="block text-xs font-medium text-slate-700 mb-1">選擇地圖 【 】</label>
+                            <input type="text" class="inp-map-pick w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.mapPick)}" placeholder="地圖名稱">
+                        </div>
+                        <div class="sm:col-span-5">
+                            <label class="block text-xs font-medium text-slate-700 mb-1">禁用地圖 (可輸入 A/B)</label>
+                            <input type="text" class="inp-map-ban w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.mapBan)}" placeholder="禁用 A/禁用 B">
+                        </div>
+                        <div class="sm:col-span-3">
+                            <label class="block text-xs font-medium text-slate-700 mb-1">${round.roundNumber}${half.halfName}比分 (A : B)</label>
+                            <div class="flex items-center gap-1">
+                                <input type="text" class="inp-half-score-a w-full text-center text-xs border border-slate-300 rounded px-1.5 py-1.5 bg-white" value="${escapeHtml(half.scoreA)}" placeholder="A">
+                                <span class="text-xs font-bold">:</span>
+                                <input type="text" class="inp-half-score-b w-full text-center text-xs border border-slate-300 rounded px-1.5 py-1.5 bg-white" value="${escapeHtml(half.scoreB)}" placeholder="B">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 求生者選用 1~4 -->
+                    <div>
+                        <label class="block text-xs font-medium text-slate-700 mb-1">選用求生者 1 ~ 4 (${escapeHtml(survTeamLabel)})</label>
+                        <div class="grid grid-cols-4 gap-1.5">
+                            <input type="text" data-idx="0" class="inp-surv-pick w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsPick[0] || '')}" placeholder="求生者 1">
+                            <input type="text" data-idx="1" class="inp-surv-pick w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsPick[1] || '')}" placeholder="求生者 2">
+                            <input type="text" data-idx="2" class="inp-surv-pick w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsPick[2] || '')}" placeholder="求生者 3">
+                            <input type="text" data-idx="3" class="inp-surv-pick w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsPick[3] || '')}" placeholder="求生者 4">
+                        </div>
+                    </div>
+
+                    <!-- 求生者禁用 1~4 -->
+                    <div>
+                        <label class="block text-xs font-medium text-slate-700 mb-1">禁用求生者 1 ~ 4 (Ban)</label>
+                        <div class="grid grid-cols-4 gap-1.5">
+                            <input type="text" data-idx="0" class="inp-surv-ban w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsBan[0] || '')}" placeholder="禁用 1">
+                            <input type="text" data-idx="1" class="inp-surv-ban w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsBan[1] || '')}" placeholder="禁用 2">
+                            <input type="text" data-idx="2" class="inp-surv-ban w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsBan[2] || '')}" placeholder="禁用 3">
+                            <input type="text" data-idx="3" class="inp-surv-ban w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.survivorsBan[3] || '')}" placeholder="禁用 4">
+                        </div>
+                    </div>
+
+                    <!-- 監管者選用與禁用 -->
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 pt-1 border-t border-slate-200/80">
+                        <div class="sm:col-span-4">
+                            <label class="block text-xs font-medium text-slate-700 mb-1">選用監管者/屠夫 (${escapeHtml(huntTeamLabel)})</label>
+                            <input type="text" class="inp-hunter-pick w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.hunterPick)}" placeholder="屠夫名稱">
+                        </div>
+                        <div class="sm:col-span-3">
+                            <label class="block text-xs font-medium text-slate-700 mb-1">選手ID (選填，自動加括號)</label>
+                            <input type="text" class="inp-hunter-player w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.hunterPlayer)}" placeholder="可留空">
+                        </div>
+                        <div class="sm:col-span-5">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="text-xs font-medium text-slate-700">禁用屠夫 (Ban)</label>
+                                <label class="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
+                                    <input type="checkbox" class="chk-hunter-ban-line rounded text-indigo-600" ${half.showHunterBanLine ? 'checked' : ''}>
+                                    <span>顯示屠夫Ban列</span>
+                                </label>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <input type="text" class="inp-hunter-ban-1 w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.huntersBan[0] || '')}" placeholder="禁用屠夫 1">
+                                <input type="text" class="inp-hunter-ban-2 w-full text-xs border border-slate-300 rounded px-2 py-1.5 bg-white" value="${escapeHtml(half.huntersBan[1] || '')}" placeholder="禁用屠夫 2">
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // 綁定陣營對調事件
+                card.querySelector('.btn-swap-role').addEventListener('click', () => {
+                    half.teamARole = half.teamARole === 'survivor' ? 'hunter' : 'survivor';
+                    renderActiveRoundEditor();
+                    renderPreviewTable();
+                });
+
+                // 綁定地圖與比分輸入事件
+                card.querySelector('.inp-map-pick').addEventListener('input', (e) => {
+                    half.mapPick = e.target.value;
+                    renderPreviewTable();
+                });
+                card.querySelector('.inp-map-ban').addEventListener('input', (e) => {
+                    half.mapBan = e.target.value;
+                    renderPreviewTable();
+                });
+                card.querySelector('.inp-half-score-a').addEventListener('input', (e) => {
+                    half.scoreA = e.target.value;
+                    renderPreviewTable();
+                    document.getElementById('inp-round-score-a').value = round.roundScoreA;
+                });
+                card.querySelector('.inp-half-score-b').addEventListener('input', (e) => {
+                    half.scoreB = e.target.value;
+                    renderPreviewTable();
+                    document.getElementById('inp-round-score-b').value = round.roundScoreB;
+                });
+
+                // 綁定求生選角與禁用
+                card.querySelectorAll('.inp-surv-pick').forEach(inp => {
+                    inp.addEventListener('input', (e) => {
+                        const i = parseInt(e.target.dataset.idx, 10);
+                        half.survivorsPick[i] = e.target.value;
+                        renderPreviewTable();
+                    });
+                });
+                card.querySelectorAll('.inp-surv-ban').forEach(inp => {
+                    inp.addEventListener('input', (e) => {
+                        const i = parseInt(e.target.dataset.idx, 10);
+                        half.survivorsBan[i] = e.target.value;
+                        renderPreviewTable();
+                    });
+                });
+
+                // 綁定監管選角與禁用
+                card.querySelector('.inp-hunter-pick').addEventListener('input', (e) => {
+                    half.hunterPick = e.target.value;
+                    renderPreviewTable();
+                });
+                card.querySelector('.inp-hunter-player').addEventListener('input', (e) => {
+                    half.hunterPlayer = e.target.value;
+                    renderPreviewTable();
+                });
+                card.querySelector('.chk-hunter-ban-line').addEventListener('change', (e) => {
+                    half.showHunterBanLine = e.target.checked;
+                    renderPreviewTable();
+                });
+                card.querySelector('.inp-hunter-ban-1').addEventListener('input', (e) => {
+                    half.huntersBan[0] = e.target.value;
+                    if (e.target.value.trim() !== '') {
+                        half.showHunterBanLine = true;
+                        card.querySelector('.chk-hunter-ban-line').checked = true;
+                    }
+                    renderPreviewTable();
+                });
+                card.querySelector('.inp-hunter-ban-2').addEventListener('input', (e) => {
+                    half.huntersBan[1] = e.target.value;
+                    if (e.target.value.trim() !== '') {
+                        half.showHunterBanLine = true;
+                        card.querySelector('.chk-hunter-ban-line').checked = true;
+                    }
+                    renderPreviewTable();
+                });
+
+                container.appendChild(card);
+            });
+        }
+
+        /**
+         * 綁定全域控制列與設定事件
+         */
+        function bindGlobalEvents() {
+            // 外觀設定變更
+            document.getElementById('opt-theme').addEventListener('change', (e) => {
+                appState.settings.theme = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-half-format').addEventListener('change', (e) => {
+                appState.settings.halfFormat = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-ban-sep').addEventListener('change', (e) => {
+                appState.settings.banSeparator = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-map-strike').addEventListener('change', (e) => {
+                appState.settings.mapStrikethrough = e.target.checked;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-pick-underline').addEventListener('change', (e) => {
+                appState.settings.pickUnderline = e.target.checked;
+                renderPreviewTable();
+            });
+            document.getElementById('opt-show-empty-ban').addEventListener('change', (e) => {
+                appState.settings.showEmptyStructure = e.target.checked;
+                renderPreviewTable();
+            });
+            document.getElementById('chk-auto-score').addEventListener('change', (e) => {
+                appState.settings.autoCalculateScore = e.target.checked;
+                renderPreviewTable();
+                renderActiveRoundEditor();
+            });
+
+            // 表頭與勝者輸入
+            document.getElementById('inp-date').addEventListener('input', (e) => {
+                appState.header.date = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('inp-team-a').addEventListener('input', (e) => {
+                appState.header.teamA = e.target.value;
+                renderActiveRoundEditor();
+                renderPreviewTable();
+            });
+            document.getElementById('inp-team-b').addEventListener('input', (e) => {
+                appState.header.teamB = e.target.value;
+                renderActiveRoundEditor();
+                renderPreviewTable();
+            });
+            document.getElementById('inp-stage').addEventListener('input', (e) => {
+                appState.header.stage = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('inp-winner').addEventListener('input', (e) => {
+                appState.footer.winner = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('btn-win-a').addEventListener('click', () => {
+                appState.footer.winner = appState.header.teamA;
+                document.getElementById('inp-winner').value = appState.footer.winner;
+                renderPreviewTable();
+            });
+            document.getElementById('btn-win-b').addEventListener('click', () => {
+                appState.footer.winner = appState.header.teamB;
+                document.getElementById('inp-winner').value = appState.footer.winner;
+                renderPreviewTable();
+            });
+            document.getElementById('inp-final-a').addEventListener('input', (e) => {
+                appState.settings.autoCalculateScore = false;
+                document.getElementById('chk-auto-score').checked = false;
+                appState.footer.finalScoreA = e.target.value;
+                renderPreviewTable();
+            });
+            document.getElementById('inp-final-b').addEventListener('input', (e) => {
+                appState.settings.autoCalculateScore = false;
+                document.getElementById('chk-auto-score').checked = false;
+                appState.footer.finalScoreB = e.target.value;
+                renderPreviewTable();
+            });
+
+            // 新增與移除局數 (支援 BO3 / BO5 加賽)
+            document.getElementById('btn-add-round').addEventListener('click', () => {
+                const nextNum = appState.rounds.length + 1;
+                appState.rounds.push({
+                    roundNumber: nextNum,
+                    roundScoreA: '',
+                    roundScoreB: '',
+                    halves: [
+                        {
+                            halfName: '上',
+                            mapPick: '地圖名稱',
+                            mapBan: '禁用 A',
+                            teamARole: 'survivor',
+                            survivorsPick: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                            survivorsBan: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                            hunterPick: '屠夫',
+                            hunterPlayer: '',
+                            huntersBan: ['', ''],
+                            showHunterBanLine: true,
+                            hunterBanTemplate: 'Ban:/',
+                            scoreA: '',
+                            scoreB: ''
+                        },
+                        {
+                            halfName: '下',
+                            mapPick: '地圖名稱',
+                            mapBan: '禁用 A',
+                            teamARole: 'hunter',
+                            survivorsPick: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                            survivorsBan: ['求生者 1', '求生者 2', '求生者 3', '求生者 4'],
+                            hunterPick: '屠夫',
+                            hunterPlayer: '',
+                            huntersBan: ['', ''],
+                            showHunterBanLine: true,
+                            hunterBanTemplate: 'Ban:/',
+                            scoreA: '',
+                            scoreB: ''
+                        }
+                    ]
+                });
+                activeRoundIndex = appState.rounds.length - 1;
+                renderControlPanel();
+                renderPreviewTable();
+                showToast(`已新增第 ${nextNum} 局`);
+            });
+
+            document.getElementById('btn-remove-round').addEventListener('click', () => {
+                if (appState.rounds.length <= 1) {
+                    showToast('至少需保留 1 局比賽資料', 'error');
+                    return;
+                }
+                appState.rounds.pop();
+                activeRoundIndex = Math.min(activeRoundIndex, appState.rounds.length - 1);
+                renderControlPanel();
+                renderPreviewTable();
+                showToast('已移除末局');
+            });
+
+            // 載入預設與實戰範本
+            document.getElementById('btn-load-template').addEventListener('click', () => {
+                appState = createTemplateState();
+                activeRoundIndex = 0;
+                renderControlPanel();
+                renderPreviewTable();
+                showToast('已重設為空白預設範本');
+            });
+
+            document.getElementById('btn-load-demo').addEventListener('click', () => {
+                appState = createDemoState();
+                activeRoundIndex = 0;
+                renderControlPanel();
+                renderPreviewTable();
+                showToast('已載入實戰範例數據');
+            });
+
+            // 複製為 Google 試算表 TSV 格式
+            document.getElementById('btn-copy-tsv').addEventListener('click', () => {
+                const lines = [];
+                appState.rounds.forEach(round => {
+                    round.halves.forEach((half, hIdx) => {
+                        const mapBanCol = hIdx === 0 ? (half.mapBan || '').replace(/\//g, ' ') : '';
+                        const mapPickCol = hIdx === 0 ? (half.mapPick || '') : '';
+                        const halfCol = half.halfName;
+                        const sBan = [0, 1, 2, 3].map(i => half.survivorsBan[i] || '');
+                        const sPick = [0, 1, 2, 3].map(i => half.survivorsPick[i] || '');
+                        const hBan1 = half.huntersBan[0] || '';
+                        const hBan2 = half.huntersBan[1] || '';
+                        const hPick = half.hunterPick || '';
+
+                        const row = [
+                            mapBanCol,
+                            mapPickCol,
+                            halfCol,
+                            ...sBan,
+                            ...sPick,
+                            hBan1,
+                            hBan2,
+                            hPick
+                        ].join('\t');
+                        lines.push(row);
+                    });
+                });
+
+                const tsvText = lines.join('\n');
+                const textarea = document.createElement('textarea');
+                textarea.value = tsvText;
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    showToast('已複製 Google 試算表分欄格式 (TSV)，可直接貼上試算表！', 'success');
+                } catch (err) {
+                    showToast('複製失敗，請手動複製', 'error');
+                }
+                document.body.removeChild(textarea);
+            });
+
+            document.getElementById('btn-export-png').addEventListener('click', async () => {
+                const wrapper = document.getElementById('export-wrapper');
+                wrapper.classList.add('exporting');
+                try {
+                    showToast('正在產生高解析度 PNG 圖片...');
+                    const bgColor = appState.settings.theme === 'dark' ? '#1c1c1c' : '#ffffff';
+                    const canvas = await html2canvas(wrapper, {
+                        scale: 2,
+                        backgroundColor: bgColor,
+                        useCORS: true,
+                        logging: false
+                    });
+                    const dataUrl = canvas.toDataURL('image/png');
+                    const link = document.createElement('a');
+                    const fileName = `${appState.header.teamA}_vs_${appState.header.teamB}_對局表.png`.replace(/[\\/:*?"<>|]/g, '_');
+                    link.download = fileName;
+                    link.href = dataUrl;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    showToast('PNG 圖片下載完成！', 'success');
+                } catch (error) {
+                    console.error(error);
+                    showToast('匯出圖片時發生錯誤', 'error');
+                } finally {
+                    wrapper.classList.remove('exporting');
+                }
+            });
+
+            document.getElementById('btn-copy-img').addEventListener('click', async () => {
+                const wrapper = document.getElementById('export-wrapper');
+                wrapper.classList.add('exporting');
+                try {
+                    showToast('正在轉換圖片至剪貼簿...');
+                    const bgColor = appState.settings.theme === 'dark' ? '#1c1c1c' : '#ffffff';
+                    const canvas = await html2canvas(wrapper, {
+                        scale: 2,
+                        backgroundColor: bgColor,
+                        useCORS: true,
+                        logging: false
+                    });
+                    canvas.toBlob(async (blob) => {
+                        if (!blob) {
+                            showToast('圖片轉換失敗', 'error');
+                            return;
+                        }
+                        try {
+                            if (navigator.clipboard && window.ClipboardItem) {
+                                const item = new ClipboardItem({ 'image/png': blob });
+                                await navigator.clipboard.write([item]);
+                                showToast('圖片已複製到剪貼簿！可直接 Ctrl+V 貼上', 'success');
+                            } else {
+                                showToast('您的瀏覽器環境限制剪貼簿寫入，請點擊「下載 PNG 圖片」', 'error');
+                            }
+                        } catch (clipErr) {
+                            showToast('因瀏覽器權限限制無法直接複製圖片，請使用右側「下載 PNG 圖片」按鈕', 'error');
+                        }
+                    }, 'image/png');
+                } catch (error) {
+                    console.error(error);
+                    showToast('處理圖片時發生錯誤', 'error');
+                } finally {
+                    wrapper.classList.remove('exporting');
+                }
+            });
+
+            document.getElementById('btn-download-html').addEventListener('click', () => {
+                const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+                const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'index.html';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('已下載 index.html，可直接上傳至您的 GitHub Repository！', 'success');
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            bindGlobalEvents();
+            renderControlPanel();
+            renderPreviewTable();
+        });
+    </script>
+</body>
+</html>
